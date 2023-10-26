@@ -1,0 +1,77 @@
+;
+; HidProxy.inf
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System ; TODO: specify appropriate Class
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318} ; TODO: specify appropriate ClassGuid
+Provider=%ManufacturerName%
+CatalogFile=HidProxy.cat
+DriverVer= ; TODO: set DriverVer in stampinf property pages
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 12
+HidProxy_Device_CoInstaller_CopyFiles = 11
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+HidProxy.sys  = 1,,
+WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll=1 ; make sure the number matches with SourceDisksNames
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName%=Standard,NT$ARCH$
+
+[Standard.NT$ARCH$]
+%HidProxy.DeviceDesc%=HidProxy_Device, Root\HidProxy ; TODO: edit hw-id
+
+[HidProxy_Device.NT]
+CopyFiles=Drivers_Dir
+
+[Drivers_Dir]
+HidProxy.sys
+
+;-------------- Service installation
+[HidProxy_Device.NT.Services]
+AddService = HidProxy,%SPSVCINST_ASSOCSERVICE%, HidProxy_Service_Inst
+
+; -------------- HidProxy driver install sections
+[HidProxy_Service_Inst]
+DisplayName    = %HidProxy.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\HidProxy.sys
+
+;
+;--- HidProxy_Device Coinstaller installation ------
+;
+
+[HidProxy_Device.NT.CoInstallers]
+AddReg=HidProxy_Device_CoInstaller_AddReg
+CopyFiles=HidProxy_Device_CoInstaller_CopyFiles
+
+[HidProxy_Device_CoInstaller_AddReg]
+HKR,,CoInstallers32,0x00010000, "WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll,WdfCoInstaller"
+
+[HidProxy_Device_CoInstaller_CopyFiles]
+WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll
+
+[HidProxy_Device.NT.Wdf]
+KmdfService =  HidProxy, HidProxy_wdfsect
+[HidProxy_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE= 0x00000002
+ManufacturerName="<Your manufacturer name>" ;TODO: Replace with your manufacturer name
+DiskName = "HidProxy Installation Disk"
+HidProxy.DeviceDesc = "HidProxy Device"
+HidProxy.SVCDESC = "HidProxy Service"
