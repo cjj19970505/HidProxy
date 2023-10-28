@@ -1,13 +1,6 @@
 #include "queue.h"
 #include "hidp.h"
 
-typedef struct _QUEUE_CONTEXT
-{
-	WDFDEVICE Device;
-} QUEUE_CONTEXT, * PQUEUE_CONTEXT;
-
-WDF_DECLARE_CONTEXT_TYPE(QUEUE_CONTEXT);
-
 EVT_WDF_IO_QUEUE_IO_READ HidProxyEvtIoRead;
 EVT_WDF_IO_QUEUE_IO_WRITE HidProxyEvtIoWrite;
 EVT_WDF_OBJECT_CONTEXT_DESTROY HidProxyEvtIoQueueContextDestroy;
@@ -86,22 +79,76 @@ HidProxyEvtIoWrite(
 		return;
 	}
 	status = WdfMemoryCopyToBuffer(memory, 0, buffer, Length);
-
-
-	PQUEUE_CONTEXT queueContext = WdfObjectGet_QUEUE_CONTEXT(Queue);
-	HidpQueueRequestHeader* header = (HidpQueueRequestHeader*)buffer;
-	
-	VHF_CONFIG vhfConfig;
-	VHF_CONFIG_INIT(&vhfConfig, WdfDeviceWdmGetDeviceObject(queueContext->Device), header->Size, header->Data);
-	
-	VHFHANDLE vhfHandle;
-	status = VhfCreate(&vhfConfig, &vhfHandle);
 	if (!NT_SUCCESS(status))
 	{
 		WdfRequestComplete(Request, status);
 	}
-	
-	WdfRequestCompleteWithInformation(Request, STATUS_SUCCESS, reinterpret_cast<ULONG_PTR>(vhfHandle));
+
+	WDFFILEOBJECT file = WdfRequestGetFileObject(Request);
+	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(file);
+
+	do
+	{
+		PQUEUE_CONTEXT queueContext = WdfObjectGet_QUEUE_CONTEXT(Queue);
+		HidpQueueRequestHeader* header = (HidpQueueRequestHeader*)buffer;
+		if (header->RequestType == HidpQueueWriteRequestType::CreateVHid)
+		{
+			if (fileContext->VhfHandle != NULL)
+			{
+				WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
+				break;
+			}
+			VHF_CONFIG vhfConfig;
+			VHF_CONFIG_INIT(&vhfConfig, WdfDeviceWdmGetDeviceObject(queueContext->Device), header->Size, header->Data);
+
+			VHFHANDLE vhfHandle = NULL;
+			status = VhfCreate(&vhfConfig, &vhfHandle);
+			if (!NT_SUCCESS(status))
+			{
+				WdfRequestComplete(Request, status);
+				break;
+			}
+			status = VhfStart(vhfHandle);
+			if (!NT_SUCCESS(status))
+			{
+				WdfRequestComplete(Request, status);
+				break;
+			}
+			fileContext->VhfHandle = vhfHandle;
+			WdfRequestComplete(Request, STATUS_SUCCESS);
+			break;
+		}
+		else if (header->RequestType == HidpQueueWriteRequestType::SendReport)
+		{
+			HidQueueRequestSubmitReport* report = reinterpret_cast<HidQueueRequestSubmitReport*>(&header->Data);
+			if (header->Size < sizeof(HidQueueRequestSubmitReport))
+			{
+				WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
+				break;
+			}
+			ULONG reportLength = header->Size - sizeof(HidQueueRequestSubmitReport);
+			
+			HID_XFER_PACKET packet;
+			packet.reportBuffer = reinterpret_cast<PUCHAR>(&report->ReportData);
+			packet.reportBufferLen = reportLength;
+			packet.reportId = report->ReportId;
+			
+			status = VhfReadReportSubmit(fileContext->VhfHandle, &packet);
+			if (!NT_SUCCESS(status))
+			{
+				WdfRequestComplete(Request, status);
+				break;
+			}
+			WdfRequestComplete(Request, STATUS_SUCCESS);
+			break;
+		}
+		else
+		{
+			WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
+			break;
+		}
+	} while (false);
+
 	ExFreePool(buffer);
 }
 

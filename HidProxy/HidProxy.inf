@@ -35,6 +35,13 @@ WdfCoInstaller$KMDFCOINSTALLERVERSION$.dll=1 ; make sure the number matches with
 [HidProxy_Device.NT]
 CopyFiles=Drivers_Dir
 
+;------Add vhf as a lower filter
+[HidProxy_Device.NT.HW]
+AddReg=HidProxy_Device.NT.AddReg
+
+[HidProxy_Device.NT.AddReg]
+HKR,,"LowerFilters",0x00010000,"vhf"
+
 [Drivers_Dir]
 HidProxy.sys
 
