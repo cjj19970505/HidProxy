@@ -52,38 +52,87 @@ UCHAR MouseReportDescriptor[] =
     0xC0,          // EndCollection()
 };
 
-//UCHAR ff[] =
-//{
-//    //
-//    // Dummy mouse collection starts here
-//    //
-//    0x05, 0x01,                         // USAGE_PAGE (Generic Desktop)     0
-//    0x09, 0x02,                         // USAGE (Mouse)                    2
-//    0xa1, 0x01,                         // COLLECTION (Application)         4
-//    //0x85, 0x01,                         //   REPORT_ID (Mouse)              6
-//    0x09, 0x01,                         //   USAGE (Pointer)                8
-//    0xa1, 0x00,                         //   COLLECTION (Physical)          10
-//    0x05, 0x09,                         //     USAGE_PAGE (Button)          12
-//    0x19, 0x01,                         //     USAGE_MINIMUM (Button 1)     14
-//    0x29, 0x02,                         //     USAGE_MAXIMUM (Button 2)     16
-//    0x15, 0x00,                         //     LOGICAL_MINIMUM (0)          18
-//    0x25, 0x01,                         //     LOGICAL_MAXIMUM (1)          20
-//    0x75, 0x01,                         //     REPORT_SIZE (1)              22
-//    0x95, 0x02,                         //     REPORT_COUNT (2)             24
-//    0x81, 0x02,                         //     INPUT (Data,Var,Abs)         26
-//    0x95, 0x06,                         //     REPORT_COUNT (6)             28
-//    0x81, 0x03,                         //     INPUT (Cnst,Var,Abs)         30
-//    0x05, 0x01,                         //     USAGE_PAGE (Generic Desktop) 32
-//    0x09, 0x30,                         //     USAGE (X)                    34
-//    0x09, 0x31,                         //     USAGE (Y)                    36
-//    0x15, 0x81,                         //     LOGICAL_MINIMUM (-127)       38
-//    0x25, 0x7f,                         //     LOGICAL_MAXIMUM (127)        40
-//    0x75, 0x08,                         //     REPORT_SIZE (8)              42
-//    0x95, 0x02,                         //     REPORT_COUNT (2)             44
-//    0x81, 0x06,                         //     INPUT (Data,Var,Rel)         46
-//    0xc0,                               //   END_COLLECTION                 48
-//    0xc0                                // END_COLLECTION                   49/50
-//};
+UCHAR PenReportDescriptor[] =
+{
+    // Integrated Windows Pen TLC
+    0x05, 0x0d,                         // USAGE_PAGE (Digitizers)          
+    0x09, 0x02,                         // USAGE (Pen)                      
+    0xa1, 0x01,                         // COLLECTION (Application)         
+    0x85, 0x01,                         //   REPORT_ID (Pen)                
+    0x09, 0x20,                         //   USAGE (Stylus)                 
+    0xa1, 0x00,                         //   COLLECTION (Physical)          
+    0x09, 0x42,                         //     USAGE (Tip Switch)           
+    0x09, 0x44,                         //     USAGE (Barrel Switch)        
+    0x09, 0x3c,                         //     USAGE (Invert)               
+    0x09, 0x45,                         //     USAGE (Eraser Switch)        
+    0x15, 0x00,                         //     LOGICAL_MINIMUM (0)          
+    0x25, 0x01,                         //     LOGICAL_MAXIMUM (1)          
+    0x75, 0x01,                         //     REPORT_SIZE (1)              
+    0x95, 0x04,                         //     REPORT_COUNT (4)             
+    0x81, 0x02,                         //     INPUT (Data,Var,Abs)         
+    0x95, 0x01,                         //     REPORT_COUNT (1)           
+    0x81, 0x03,                         //     INPUT (Cnst,Var,Abs)      
+    0x09, 0x32,                         //     USAGE (In Range)             
+    0x81, 0x02,                         //     INPUT (Data,Var,Abs)         
+    0x95, 0x02,                         //     REPORT_COUNT (2)             
+    0x81, 0x03,                         //     INPUT (Cnst,Var,Abs)         
+    0x05, 0x01,                         //     USAGE_PAGE (Generic Desktop) 
+    0x09, 0x30,                         //     USAGE (X)                    
+    0x75, 0x10,                         //     REPORT_SIZE (16)             
+    0x95, 0x01,                         //     REPORT_COUNT (1)             
+    0xa4,                               //     PUSH                         
+    0x55, 0x0d,                         //     UNIT_EXPONENT (-3)           
+    0x65, 0x13,                         //     UNIT (Inch,EngLinear)        
+    0x35, 0x00,                         //     PHYSICAL_MINIMUM (0)         
+    0x46, 0x3a, 0x20,                   //     PHYSICAL_MAXIMUM (8250)      
+    0x26, 0xf8, 0x52,                   //     LOGICAL_MAXIMUM (21240)      
+    0x81, 0x02,                         //     INPUT (Data,Var,Abs)         
+    0x09, 0x31,                         //     USAGE (Y)                    
+    0x46, 0x2c, 0x18,                   //     PHYSICAL_MAXIMUM (6188)      
+    0x26, 0x6c, 0x3e,                   //     LOGICAL_MAXIMUM (15980)      
+    0x81, 0x02,                         //     INPUT (Data,Var,Abs)         
+    0xb4,                               //     POP                          
+    0x05, 0x0d,                         //     USAGE_PAGE (Digitizers)      
+    0x09, 0x30,                         //     USAGE (Tip Pressure)         
+    0x26, 0xff, 0x00,                   //     LOGICAL_MAXIMUM (255)        
+    0x81, 0x02,                         //     INPUT (Data,Var,Abs)         
+    0x75, 0x08,                         //     REPORT_SIZE (8)              
+    0x09, 0x3d,                         //     USAGE (X Tilt)               
+    0x15, 0x81,                         //     LOGICAL_MINIMUM (-127)       
+    0x25, 0x7f,                         //     LOGICAL_MAXIMUM (127)        
+    0x81, 0x02,                         //     INPUT (Data,Var,Abs)         
+    0x09, 0x3e,                         //     USAGE (Y Tilt)               
+    0x15, 0x81,                         //     LOGICAL_MINIMUM (-127)       
+    0x25, 0x7f,                         //     LOGICAL_MAXIMUM (127)        
+    0x81, 0x02,                         //     INPUT (Data,Var,Abs)         
+    0xc0,                               //   END_COLLECTION                 
+    0xc0                                // END_COLLECTION
+};
+
+struct PenReportByte1
+{
+    uint8_t TipSwitch : 1;
+    uint8_t BarrelSwitch : 1;
+    uint8_t Invert : 1;
+    uint8_t EraserSwitch : 1;
+    uint8_t Reserved1 : 1;
+    uint8_t InRange : 1;
+    uint8_t Reserved2 : 2;
+};
+
+uint8_t ReportDataBuffer[1 + 1 + 2 + 2 + 2 + 1 + 1];
+
+void GetReportDataBuffer(uint8_t* buffer, uint8_t reportId, PenReportByte1 reportByte1, uint16_t x, uint16_t y, uint16_t tipPressure, uint8_t xTilt, uint8_t yTilt)
+{
+    buffer[0] = reportId;
+    *reinterpret_cast<PenReportByte1*>(&buffer[1]) = reportByte1;
+    *reinterpret_cast<uint16_t*>(&buffer[2]) = x;
+    *reinterpret_cast<uint16_t*>(&buffer[4]) = x;
+    *reinterpret_cast<uint16_t*>(&buffer[5]) = tipPressure;
+    *reinterpret_cast<uint16_t*>(&buffer[7]) = xTilt;
+    *reinterpret_cast<uint16_t*>(&buffer[8]) = yTilt;
+}
+
 
 int main()
 {
@@ -92,7 +141,18 @@ int main()
     HIDPHANDLE hidp = nullptr;
     do
     {
-        hr = HidpCreate(sizeof(MouseReportDescriptor), MouseReportDescriptor, &hidp);
+        hr = HidpCreate(sizeof(PenReportDescriptor), PenReportDescriptor, &hidp);
+
+        PenReportByte1 penReportByte1{};
+        penReportByte1.TipSwitch = 0;
+        penReportByte1.BarrelSwitch = 0;
+        penReportByte1.Invert = 0;
+        penReportByte1.EraserSwitch = 0;
+        penReportByte1.Reserved1 = 0;
+        penReportByte1.InRange = 1;
+        penReportByte1.Reserved2 = 0;
+
+        GetReportDataBuffer(ReportDataBuffer, 1, penReportByte1, 1000, 1000, 0, 0, 0);
 
         while (true)
         {
@@ -100,9 +160,9 @@ int main()
 
             // According to HID speicification 5.8
             // The first byte should be Report ID if defined in descriptor
-            uint8_t payload[4] = { 2, 10, 10, 0 };
-            hr = HidpSubmitReport(hidp, 2, 4, payload);
-            Sleep(500);
+            // uint8_t payload[4] = { 2, 10, 10, 0 };
+            hr = HidpSubmitReport(hidp, 1, sizeof(ReportDataBuffer), ReportDataBuffer);
+            Sleep(1000/60);
         }
         
         bool b = HidpClose(hidp);
