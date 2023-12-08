@@ -127,10 +127,10 @@ void GetReportDataBuffer(uint8_t* buffer, uint8_t reportId, PenReportByte1 repor
     buffer[0] = reportId;
     *reinterpret_cast<PenReportByte1*>(&buffer[1]) = reportByte1;
     *reinterpret_cast<uint16_t*>(&buffer[2]) = x;
-    *reinterpret_cast<uint16_t*>(&buffer[4]) = x;
-    *reinterpret_cast<uint16_t*>(&buffer[5]) = tipPressure;
-    *reinterpret_cast<uint16_t*>(&buffer[7]) = xTilt;
-    *reinterpret_cast<uint16_t*>(&buffer[8]) = yTilt;
+    *reinterpret_cast<uint16_t*>(&buffer[4]) = y;
+    *reinterpret_cast<uint16_t*>(&buffer[6]) = tipPressure;
+    *reinterpret_cast<uint16_t*>(&buffer[8]) = xTilt;
+    *reinterpret_cast<uint16_t*>(&buffer[9]) = yTilt;
 }
 
 
@@ -152,7 +152,8 @@ int main()
         penReportByte1.InRange = 1;
         penReportByte1.Reserved2 = 0;
 
-        GetReportDataBuffer(ReportDataBuffer, 1, penReportByte1, 1000, 1000, 0, 0, 0);
+        uint16_t x = 0;
+        uint16_t y = 0;
 
         while (true)
         {
@@ -161,8 +162,14 @@ int main()
             // According to HID speicification 5.8
             // The first byte should be Report ID if defined in descriptor
             // uint8_t payload[4] = { 2, 10, 10, 0 };
+            x += 1;
+            x %= 21241;
+            y += 1;
+            y %= 15981;
+            GetReportDataBuffer(ReportDataBuffer, 1, penReportByte1, x, y, 0, 0, 0);
             hr = HidpSubmitReport(hidp, 1, sizeof(ReportDataBuffer), ReportDataBuffer);
-            Sleep(1000/60);
+            std::cout << x << std::endl;
+            Sleep(1);
         }
         
         bool b = HidpClose(hidp);
