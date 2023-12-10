@@ -1,0 +1,8 @@
+namespace LibHidpRT
+{
+	runtimeclass Hidp: Windows.Foundation.IClosable
+	{
+		static Windows.Foundation.IAsyncOperation<Hidp> CreateAsync(Windows.Storage.Streams.Buffer reportDescriptor);
+		Windows.Foundation.IAsyncAction SubmitReportAsync(UInt8 reportId, Windows.Storage.Streams.IBuffer reportData);
+	}
+}

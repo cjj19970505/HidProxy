@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "AoaRTTest": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}

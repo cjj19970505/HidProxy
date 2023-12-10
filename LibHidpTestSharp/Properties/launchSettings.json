@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "LibHidpTestSharp": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}

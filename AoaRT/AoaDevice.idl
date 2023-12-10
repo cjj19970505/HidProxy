@@ -1,0 +1,19 @@
+namespace AoaRT
+{
+    struct AoaCredential
+    {
+        String manufacturer;
+        String modelName;
+        String description;
+        String version;
+        String Uri;
+        String serialNumber;
+    };
+
+    runtimeclass AoaDevice: Windows.Foundation.IClosable
+    {
+        static Windows.Foundation.IAsyncOperation<AoaDevice> CreateAsync(AoaCredential aoaCredential);
+        Windows.Storage.Streams.IInputStream InputStream{ get; };
+        Windows.Storage.Streams.IOutputStream OutputStream{ get; };
+    }
+}

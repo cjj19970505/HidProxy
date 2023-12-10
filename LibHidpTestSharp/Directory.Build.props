@@ -1,0 +1,20 @@
+<!-- https://learn.microsoft.com/en-us/windows/apps/develop/platform/csharp-winrt/net-projection-from-cppwinrt-component -->
+<Project>
+  
+  <!-- https://learn.microsoft.com/en-us/windows/apps/develop/platform/csharp-winrt/net-projection-from-cppwinrt-component#known-issues -->
+  <PropertyGroup>
+    <!-- Workaround for MSB3271 error on processor architecture mismatch -->
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+  </PropertyGroup>
+  
+  <PropertyGroup>
+    <!--<TargetFramework>net8.0-windows</TargetFramework>-->
+    <!-- Set Platform to AnyCPU to allow consumption of the projection assembly from any architecture. -->
+    <!-- <Platform>AnyCPU</Platform> -->
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <CsWinRTIncludes>LibHidpRT</CsWinRTIncludes>
+    <!--<CsWinRTGeneratedFilesDir>$(OutDir)</CsWinRTGeneratedFilesDir>-->
+  </PropertyGroup>
+</Project>
