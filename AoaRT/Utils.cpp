@@ -221,7 +221,7 @@ winrt::Windows::Foundation::IAsyncAction Utils::WinUsbControlTransferAsync(WINUS
 		if (err != ERROR_IO_PENDING)
 		{
 			bStatus = CloseHandle(overlapped.hEvent);
-			throw hresult(HRESULT_FROM_NT(err));
+			throw hresult(HRESULT_FROM_WIN32(err));
 		}
 	}
 	co_await resume_on_signal(overlapped.hEvent);
@@ -229,7 +229,7 @@ winrt::Windows::Foundation::IAsyncAction Utils::WinUsbControlTransferAsync(WINUS
 	if (!bStatus)
 	{
 		auto err = GetLastError();
-		throw hresult(HRESULT_FROM_NT(err));
+		throw hresult(HRESULT_FROM_WIN32(err));
 	}
 	if (buffer != nullptr && (setupPacket.RequestType | 0x80) != 0)
 	{
@@ -238,7 +238,7 @@ winrt::Windows::Foundation::IAsyncAction Utils::WinUsbControlTransferAsync(WINUS
 		if (!bStatus)
 		{
 			auto err = GetLastError();
-			throw hresult(HRESULT_FROM_NT(err));
+			throw hresult(HRESULT_FROM_WIN32(err));
 		}
 		buffer.Length(numOfBytesTransferred);
 	}

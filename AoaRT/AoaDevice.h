@@ -36,7 +36,17 @@ namespace winrt::AoaRT::implementation
         static winrt::Windows::Foundation::IAsyncOperation<winrt::AoaRT::AoaDevice> CreateAsync(winrt::AoaRT::AoaCredential aoaCredential);
         winrt::Windows::Storage::Streams::IInputStream InputStream();
         winrt::Windows::Storage::Streams::IOutputStream OutputStream();
-        
+
+        uint16_t InputMaxPacketSize()
+        {
+            return _InEndpointDescriptor.wMaxPacketSize;
+        }
+        uint16_t OutputMaxPacketSize()
+        {
+            return _OutEndpointDescriptor.wMaxPacketSize;
+        }
+        winrt::Windows::Foundation::IAsyncAction ReadToBufferAsync(winrt::Windows::Storage::Streams::IBuffer buffer);
+
         void Close();
         
         WINUSB_INTERFACE_HANDLE AoaInterfaceHandle()

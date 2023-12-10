@@ -1,12 +1,11 @@
-﻿using LibHidpRT;
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Runtime.InteropServices.WindowsRuntime;
-using Windows.Networking.Sockets;
+﻿using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Tasks.Dataflow;
 using Windows.Storage.Streams;
+using AoaRT;
+using LibHidpRT;
+using System.Net;
 
-namespace LibHidpTestSharp
+namespace BooxAsDigitizer.Test
 {
     internal class Program
     {
@@ -52,7 +51,7 @@ namespace LibHidpTestSharp
             0xb4,                               //     POP                          
             0x05, 0x0d,                         //     USAGE_PAGE (Digitizers)      
             0x09, 0x30,                         //     USAGE (Tip Pressure)         
-            0x26, 0xff, 0x00,                   //     LOGICAL_MAXIMUM (255)        
+            0x26, 0xff, 0x00,                   //     LOGICAL_MAXIMUM (255)
             0x81, 0x02,                         //     INPUT (Data,Var,Abs)         
             0x75, 0x08,                         //     REPORT_SIZE (8)              
             0x09, 0x3d,                         //     USAGE (X Tilt)               
@@ -66,56 +65,68 @@ namespace LibHidpTestSharp
             0xc0,                               //   END_COLLECTION                 
             0xc0                                // END_COLLECTION
         };
+
+        static BufferBlock<Windows.Storage.Streams.Buffer> PendingBuffers = new();
         static async Task Main(string[] args)
+        {
+            var receiveBufferTask = ReceiveBufferAsync();
+            var consumeBufferTask = ConsumeBufferAsync();
+            await Task.WhenAll(receiveBufferTask, consumeBufferTask);
+        }
+
+        static async Task ReceiveBufferAsync()
+        {
+            AoaCredential credential = new AoaCredential()
+            {
+                manufacturer = "XeonCJJ",
+                modelName = "BooxAsDigitizer",
+                description = "BooxAsDigitizer Description",
+                version = "0.1",
+                Uri = "https://dev.azure.com/xeonj/Misc/_git/BooxAsDigitizer",
+                serialNumber = "00000000"
+            };
+            using (var device = await AoaDevice.CreateAsync(credential))
+            {
+                var preReadBuffer = new Windows.Storage.Streams.Buffer(device.InputMaxPacketSize);
+                while (true)
+                {
+                    await device.ReadToBufferAsync(preReadBuffer);
+                    var readBuffer = new Windows.Storage.Streams.Buffer(preReadBuffer.Length);
+                    readBuffer.Length = readBuffer.Capacity;
+                    preReadBuffer.CopyTo(readBuffer);
+                    await PendingBuffers.SendAsync(readBuffer);
+                }
+            }
+        }
+
+        static async Task ConsumeBufferAsync()
         {
             var penReportDescriptorBuffer = new Windows.Storage.Streams.Buffer((uint)(PenReportDescriptor.Length));
             penReportDescriptorBuffer.Length = (uint)PenReportDescriptor.Length;
-            using(var stream = penReportDescriptorBuffer.AsStream())
+            using (var stream = penReportDescriptorBuffer.AsStream())
             {
                 await stream.WriteAsync(PenReportDescriptor);
             }
-            var hidp = await Hidp.CreateAsync(penReportDescriptorBuffer);
-
-            UInt16 x = 0;
-            UInt16 y = 0;
-
-            while(x <= 21241)
+            using (var hidp = await Hidp.CreateAsync(penReportDescriptorBuffer))
             {
-                x += 1;
-                y += 1;
-                y %= 15981;
-
-                var penReportBuffer = writePenReportDatabuffer(1, false, false, false, false, true, x, y, 0, 0, 0);
-                await hidp.SubmitReportAsync(1, penReportBuffer);
-                await Task.Delay(1);
+                while (true)
+                {
+                    var msg = await PendingBuffers.ReceiveAsync();
+                    using (var reader = DataReader.FromBuffer(msg))
+                    {
+                        reader.ByteOrder = ByteOrder.LittleEndian;
+                        var reportId = reader.ReadByte();
+                        var byte1 = reader.ReadByte();
+                        var x = reader.ReadUInt16();
+                        var y = reader.ReadUInt16();
+                        var tipPressure = reader.ReadUInt16();
+                        var xTilt = reader.ReadByte();
+                        var yTilt = reader.ReadByte();
+                        // Console.WriteLine($"msg.Length={msg.Length}, reportId={reportId}, b1={byte1}, x={x}, y={y}");
+                        await hidp.SubmitReportAsync(1, msg);
+                    }
+                }
             }
-
-            hidp.Dispose();
-            
-        }
-
-        static IBuffer writePenReportDatabuffer(Byte reportId, bool tipSwitch, bool barrelSwitch, bool invert, bool eraserSwitch, bool inRange, UInt16 x, UInt16 y, UInt16 tipPressure, Byte xTilt, Byte yTilt)
-        {
-            using(var writer = new DataWriter())
-            {
-                writer.ByteOrder = ByteOrder.LittleEndian;
-                Byte reportByte1 = 0;
-                reportByte1 |= (byte)(tipSwitch ? 0x1 : 0);
-                reportByte1 |= (byte)(barrelSwitch ? 0x2 : 0);
-                reportByte1 |= (byte)(invert ? 0x4 : 0);
-                reportByte1 |= (byte)(eraserSwitch ? 0x8 : 0);
-                reportByte1 |= (byte)(inRange ? 0x20 : 0);
-
-                writer.WriteByte(reportId);
-                writer.WriteByte(reportByte1);
-                writer.WriteUInt16(x);
-                writer.WriteUInt16(y);
-                writer.WriteUInt16(tipPressure);
-                writer.WriteByte(xTilt);
-                writer.WriteByte(yTilt);
-                return writer.DetachBuffer();
-            }
-            
         }
     }
 }

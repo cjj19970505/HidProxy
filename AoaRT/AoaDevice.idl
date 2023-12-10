@@ -15,5 +15,8 @@ namespace AoaRT
         static Windows.Foundation.IAsyncOperation<AoaDevice> CreateAsync(AoaCredential aoaCredential);
         Windows.Storage.Streams.IInputStream InputStream{ get; };
         Windows.Storage.Streams.IOutputStream OutputStream{ get; };
+        UInt16 InputMaxPacketSize{ get; };
+        UInt16 OutputMaxPacketSize{ get; };
+        Windows.Foundation.IAsyncAction ReadToBufferAsync(Windows.Storage.Streams.IBuffer buffer);
     }
 }
