@@ -230,24 +230,24 @@ namespace winrt::AoaRT::implementation
 	winrt::Windows::Foundation::IAsyncAction AoaDevice::StartAccessoryModeAsync(WINUSB_INTERFACE_HANDLE interfaceHandle, const winrt::AoaRT::AoaCredential& aoaCredential)
 	{
 		BOOL bStatus = TRUE;
-		uint16_t protocolVersionNumber = 0;
 		{
 			WINUSB_SETUP_PACKET p1{};
 			p1.RequestType = 0xc0;
 			p1.Request = 51;
 			p1.Value = 0;
 			p1.Index = 0;
-			p1.Length = sizeof(protocolVersionNumber);
+			p1.Length = sizeof(uint16_t);
 			ULONG lengthTransferred = 0;
-
-			bStatus = WinUsb_ControlTransfer(interfaceHandle, p1, reinterpret_cast<PUCHAR>(&protocolVersionNumber), 2, &lengthTransferred, NULL);
+			Buffer protocolVersionNumberBuffer{ sizeof(uint16_t) };
+			ZeroMemory(protocolVersionNumberBuffer.data(), protocolVersionNumberBuffer.Capacity());
+			co_await Utils::WinUsbControlTransferAsync(interfaceHandle, p1, protocolVersionNumberBuffer);
 			if (!bStatus)
 			{
 				auto err = GetLastError();
 				check_nt(err);
 			}
 
-			if (protocolVersionNumber == 0)
+			if (*reinterpret_cast<uint16_t*>(protocolVersionNumberBuffer.data()) == 0)
 			{
 				check_nt(ERROR_NOT_SUPPORTED);
 			}
