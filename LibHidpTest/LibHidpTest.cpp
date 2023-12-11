@@ -289,7 +289,6 @@ int main()
 
         uint16_t x = 0;
         uint16_t y = 0;
-        GetTouchReportDataBuffer(TouchReportDataBuffer, 1, touchReportByte1, x, y, 10, 1, 1);
         Sleep(10);
         while (true)
         {
