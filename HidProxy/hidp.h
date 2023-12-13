@@ -7,7 +7,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_HIDP,
 
 enum class HidpQueueWriteRequestType
 {
-	CreateVHid, SendReport
+	CreateVHid = 0, SendReport = 1, GetFeature = 2
 };
 
 #pragma warning(disable : 4200)

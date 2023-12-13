@@ -4,6 +4,8 @@
 EVT_WDF_IO_QUEUE_IO_READ HidProxyEvtIoRead;
 EVT_WDF_IO_QUEUE_IO_WRITE HidProxyEvtIoWrite;
 EVT_WDF_OBJECT_CONTEXT_DESTROY HidProxyEvtIoQueueContextDestroy;
+EVT_VHF_ASYNC_OPERATION VhfAsyncOperationGetFeature;
+EVT_VHF_ASYNC_OPERATION VhfAsyncOperationSetFeature;
 
 NTSTATUS HidProxyQueueInitialize(WDFDEVICE Device)
 {
@@ -100,6 +102,9 @@ HidProxyEvtIoWrite(
 			}
 			VHF_CONFIG vhfConfig;
 			VHF_CONFIG_INIT(&vhfConfig, WdfDeviceWdmGetDeviceObject(queueContext->Device), header->Size, header->Data);
+			vhfConfig.EvtVhfAsyncOperationGetFeature = VhfAsyncOperationGetFeature;
+			vhfConfig.EvtVhfAsyncOperationSetFeature = VhfAsyncOperationSetFeature;
+			vhfConfig.OperationContextSize = 512u;
 
 			VHFHANDLE vhfHandle = NULL;
 			status = VhfCreate(&vhfConfig, &vhfHandle);
@@ -150,6 +155,51 @@ HidProxyEvtIoWrite(
 	} while (false);
 
 	ExFreePool(buffer);
+}
+
+UCHAR featureReport[2] = { 0x02, 0x15 };
+VOID
+VhfAsyncOperationGetFeature(
+	_In_
+	PVOID               VhfClientContext,
+	_In_
+	VHFOPERATIONHANDLE  VhfOperationHandle,
+	_In_opt_
+	PVOID               VhfOperationContext,
+	_In_
+	PHID_XFER_PACKET    HidTransferPacket
+)
+{
+	PAGED_CODE();
+	UNREFERENCED_PARAMETER(VhfClientContext);
+	UNREFERENCED_PARAMETER(VhfOperationContext);
+	NTSTATUS status = STATUS_SUCCESS;
+	
+	HidTransferPacket->reportBuffer[0] = featureReport[0];
+	HidTransferPacket->reportBuffer[1] = featureReport[1];
+	// HidTransferPacket->reportBufferLen = 2;
+	status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
+}
+
+VOID
+VhfAsyncOperationSetFeature(
+	_In_
+	PVOID               VhfClientContext,
+	_In_
+	VHFOPERATIONHANDLE  VhfOperationHandle,
+	_In_opt_
+	PVOID               VhfOperationContext,
+	_In_
+	PHID_XFER_PACKET    HidTransferPacket
+)
+{
+	PAGED_CODE();
+	UNREFERENCED_PARAMETER(VhfClientContext);
+	UNREFERENCED_PARAMETER(VhfOperationContext);
+	UNREFERENCED_PARAMETER(HidTransferPacket);
+	NTSTATUS status = STATUS_SUCCESS;
+
+	status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
 }
 
 VOID HidProxyEvtIoQueueContextDestroy(_In_ WDFOBJECT Object)
