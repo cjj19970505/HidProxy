@@ -1,11 +1,15 @@
 #include "queue.h"
 #include "hidp.h"
+#include "device.h"
 
 EVT_WDF_IO_QUEUE_IO_READ HidProxyEvtIoRead;
 EVT_WDF_IO_QUEUE_IO_WRITE HidProxyEvtIoWrite;
-EVT_WDF_OBJECT_CONTEXT_DESTROY HidProxyEvtIoQueueContextDestroy;
-EVT_VHF_ASYNC_OPERATION VhfAsyncOperationGetFeature;
-EVT_VHF_ASYNC_OPERATION VhfAsyncOperationSetFeature;
+EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL HidProxyEvtIoDeviceControl;
+
+typedef struct _VHF_CLIENT_CONTEXT
+{
+	WDFFILEOBJECT FileObject;
+} VHF_CLIENT_CONTEXT, * PVHF_CLIENT_CONTEXT;
 
 NTSTATUS HidProxyQueueInitialize(WDFDEVICE Device)
 {
@@ -13,16 +17,15 @@ NTSTATUS HidProxyQueueInitialize(WDFDEVICE Device)
 	NTSTATUS status = STATUS_SUCCESS;
 	PQUEUE_CONTEXT queueContext;
 	WDF_IO_QUEUE_CONFIG queueConfig;
-	WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchSequential);
+	WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchParallel);
 
 	queueConfig.EvtIoRead = HidProxyEvtIoRead;
 	queueConfig.EvtIoWrite = HidProxyEvtIoWrite;
-	
+	queueConfig.EvtIoDeviceControl = HidProxyEvtIoDeviceControl;
 	
 	WDF_OBJECT_ATTRIBUTES queueAttributes;
 	WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&queueAttributes, QUEUE_CONTEXT);
 	queueAttributes.SynchronizationScope = WdfSynchronizationScopeQueue;
-	queueAttributes.EvtDestroyCallback = HidProxyEvtIoQueueContextDestroy;
 	queueAttributes.ExecutionLevel = WdfExecutionLevelPassive;
 
 	WDFQUEUE queue;
@@ -40,6 +43,35 @@ NTSTATUS HidProxyQueueInitialize(WDFDEVICE Device)
 }
 
 VOID
+HidProxyEvtIoDeviceControl(
+	_In_
+	WDFQUEUE Queue,
+	_In_
+	WDFREQUEST Request,
+	_In_
+	size_t OutputBufferLength,
+	_In_
+	size_t InputBufferLength,
+	_In_
+	ULONG IoControlCode
+)
+{
+	UNREFERENCED_PARAMETER(Queue);
+	UNREFERENCED_PARAMETER(OutputBufferLength);
+	UNREFERENCED_PARAMETER(InputBufferLength);
+	UNREFERENCED_PARAMETER(IoControlCode);
+
+	NTSTATUS status = STATUS_SUCCESS;
+	WDFFILEOBJECT file = WdfRequestGetFileObject(Request);
+	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(file);
+	status = WdfRequestForwardToIoQueue(Request, fileContext->FileQueue);
+	if (!NT_SUCCESS(status))
+	{
+		WdfRequestComplete(Request, status);
+	}
+}
+
+VOID
 HidProxyEvtIoRead(
 	_In_
 	WDFQUEUE Queue,
@@ -50,8 +82,16 @@ HidProxyEvtIoRead(
 )
 {
 	UNREFERENCED_PARAMETER(Queue);
-	UNREFERENCED_PARAMETER(Request);
 	UNREFERENCED_PARAMETER(Length);
+
+	NTSTATUS status = STATUS_SUCCESS;
+	WDFFILEOBJECT file = WdfRequestGetFileObject(Request);
+	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(file);
+	status = WdfRequestForwardToIoQueue(Request, fileContext->FileQueue);
+	if (!NT_SUCCESS(status))
+	{
+		WdfRequestComplete(Request, status);
+	}
 }
 
 VOID
@@ -64,146 +104,16 @@ HidProxyEvtIoWrite(
 	size_t Length
 )
 {
-	NTSTATUS status;
-	WDFMEMORY memory;
-	
-	status = WdfRequestRetrieveInputMemory(Request, &memory);
-	if (!NT_SUCCESS(status))
-	{
-		WdfRequestComplete(Request, status);
-		return;
-	}
+	UNREFERENCED_PARAMETER(Queue);
+	UNREFERENCED_PARAMETER(Length);
 
-	PVOID buffer = ExAllocatePool2(POOL_FLAG_NON_PAGED, Length, 'sam1');
-	if (buffer == NULL)
-	{
-		WdfRequestComplete(Request, STATUS_INSUFFICIENT_RESOURCES);
-		return;
-	}
-	status = WdfMemoryCopyToBuffer(memory, 0, buffer, Length);
-	if (!NT_SUCCESS(status))
-	{
-		WdfRequestComplete(Request, status);
-	}
-
+	NTSTATUS status = STATUS_SUCCESS;
 	WDFFILEOBJECT file = WdfRequestGetFileObject(Request);
 	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(file);
-
-	do
+	status = WdfRequestForwardToIoQueue(Request, fileContext->FileQueue);
+	if (!NT_SUCCESS(status))
 	{
-		PQUEUE_CONTEXT queueContext = WdfObjectGet_QUEUE_CONTEXT(Queue);
-		HidpQueueRequestHeader* header = (HidpQueueRequestHeader*)buffer;
-		if (header->RequestType == HidpQueueWriteRequestType::CreateVHid)
-		{
-			if (fileContext->VhfHandle != NULL)
-			{
-				WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
-				break;
-			}
-			VHF_CONFIG vhfConfig;
-			VHF_CONFIG_INIT(&vhfConfig, WdfDeviceWdmGetDeviceObject(queueContext->Device), header->Size, header->Data);
-			vhfConfig.EvtVhfAsyncOperationGetFeature = VhfAsyncOperationGetFeature;
-			vhfConfig.EvtVhfAsyncOperationSetFeature = VhfAsyncOperationSetFeature;
-			vhfConfig.OperationContextSize = 512u;
-
-			VHFHANDLE vhfHandle = NULL;
-			status = VhfCreate(&vhfConfig, &vhfHandle);
-			if (!NT_SUCCESS(status))
-			{
-				WdfRequestComplete(Request, status);
-				break;
-			}
-			status = VhfStart(vhfHandle);
-			if (!NT_SUCCESS(status))
-			{
-				WdfRequestComplete(Request, status);
-				break;
-			}
-			fileContext->VhfHandle = vhfHandle;
-			WdfRequestComplete(Request, STATUS_SUCCESS);
-			break;
-		}
-		else if (header->RequestType == HidpQueueWriteRequestType::SendReport)
-		{
-			HidQueueRequestSubmitReport* report = reinterpret_cast<HidQueueRequestSubmitReport*>(&header->Data);
-			if (header->Size < sizeof(HidQueueRequestSubmitReport))
-			{
-				WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
-				break;
-			}
-			ULONG reportLength = header->Size - sizeof(HidQueueRequestSubmitReport);
-			
-			HID_XFER_PACKET packet;
-			packet.reportBuffer = reinterpret_cast<PUCHAR>(&report->ReportData);
-			packet.reportBufferLen = reportLength;
-			packet.reportId = report->ReportId;
-			
-			status = VhfReadReportSubmit(fileContext->VhfHandle, &packet);
-			if (!NT_SUCCESS(status))
-			{
-				WdfRequestComplete(Request, status);
-				break;
-			}
-			WdfRequestComplete(Request, STATUS_SUCCESS);
-			break;
-		}
-		else
-		{
-			WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
-			break;
-		}
-	} while (false);
-
-	ExFreePool(buffer);
-}
-
-UCHAR featureReport[2] = { 0x02, 0x15 };
-VOID
-VhfAsyncOperationGetFeature(
-	_In_
-	PVOID               VhfClientContext,
-	_In_
-	VHFOPERATIONHANDLE  VhfOperationHandle,
-	_In_opt_
-	PVOID               VhfOperationContext,
-	_In_
-	PHID_XFER_PACKET    HidTransferPacket
-)
-{
-	PAGED_CODE();
-	UNREFERENCED_PARAMETER(VhfClientContext);
-	UNREFERENCED_PARAMETER(VhfOperationContext);
-	NTSTATUS status = STATUS_SUCCESS;
-	
-	HidTransferPacket->reportBuffer[0] = featureReport[0];
-	HidTransferPacket->reportBuffer[1] = featureReport[1];
-	// HidTransferPacket->reportBufferLen = 2;
-	status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
-}
-
-VOID
-VhfAsyncOperationSetFeature(
-	_In_
-	PVOID               VhfClientContext,
-	_In_
-	VHFOPERATIONHANDLE  VhfOperationHandle,
-	_In_opt_
-	PVOID               VhfOperationContext,
-	_In_
-	PHID_XFER_PACKET    HidTransferPacket
-)
-{
-	PAGED_CODE();
-	UNREFERENCED_PARAMETER(VhfClientContext);
-	UNREFERENCED_PARAMETER(VhfOperationContext);
-	UNREFERENCED_PARAMETER(HidTransferPacket);
-	NTSTATUS status = STATUS_SUCCESS;
-
-	status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
-}
-
-VOID HidProxyEvtIoQueueContextDestroy(_In_ WDFOBJECT Object)
-{
-	UNREFERENCED_PARAMETER(Object);
+		WdfRequestComplete(Request, status);
+	}
 }
 

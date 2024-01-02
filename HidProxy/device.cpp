@@ -1,6 +1,8 @@
 #include "device.h"
 #include "queue.h"
 #include "hidp.h"
+#include "NotificationQueue.h"
+#include "FileQueue.h"
 
 EVT_WDF_DEVICE_SELF_MANAGED_IO_INIT  HidProxyEvtDeviceSelfManagedIoInit;
 EVT_WDF_DEVICE_SELF_MANAGED_IO_SUSPEND  HidProxyEvtDeviceSelfManagedIoSuspend;
@@ -94,10 +96,27 @@ HidProxyEvtDeviceFileCreate(
 )
 {
 	UNREFERENCED_PARAMETER(Device);
-	UNREFERENCED_PARAMETER(Request);
 	PAGED_CODE();
+	NTSTATUS status = STATUS_SUCCESS;
 	PFILE_CONTEXT pFileContext = WdfObjectGet_FILE_CONTEXT(FileObject);
+	pFileContext->Device = Device;
 	pFileContext->VhfHandle = NULL;
+	WDFQUEUE fileQueue = NULL;
+	status = HidProxyFileQueueInitialize(FileObject, &fileQueue);
+	if (!NT_SUCCESS(status))
+	{
+		WdfRequestComplete(Request, status);
+		return;
+	}
+	pFileContext->FileQueue = fileQueue;
+	WDFQUEUE notificationQueue = NULL;
+	status = HidProxyNotificationQueueInitialize(FileObject, &notificationQueue);
+	if (!NT_SUCCESS(status))
+	{
+		WdfRequestComplete(Request, status);
+		return;
+	}
+	pFileContext->NotificationQueue = notificationQueue;
 	WdfRequestComplete(Request, STATUS_SUCCESS);
 }
 

@@ -7,7 +7,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_HIDP,
 
 enum class HidpQueueWriteRequestType
 {
-	CreateVHid = 0, SendReport = 1, GetFeature = 2
+	CreateVHid = 0, SendReport = 1, SetFeature = 2, RegisterNotification = 100
 };
 
 #pragma warning(disable : 4200)
@@ -24,3 +24,31 @@ struct HidQueueRequestSubmitReport
 	UCHAR ReportId;
 	UCHAR ReportData[0];
 };
+
+struct HidQueueSetFeatureCompletionInfo
+{
+	VOID* VhfOperationHandle;
+	LONG Status;
+};
+
+enum class HidpNotificationType
+{
+	GetFeature = 0, SetFeature = 1, WriteReport = 2
+};
+
+#pragma warning(disable : 4200)
+struct HidpNotificationHeader
+{
+	HidpNotificationType NotificationType;
+	VOID* VhfOperationHandle;
+	UCHAR ReportId;
+	ULONG ReportBufferLen;
+	UCHAR Data[0];
+};
+
+//
+// The following value is arbitrarily chosen from the space defined by Microsoft
+// as being "for non-Microsoft use"
+//
+#define FILE_DEVICE_INVERTED 0xCF54
+#define IOCTL_REGISTER_NOTIFICATION CTL_CODE(FILE_DEVICE_INVERTED, 2049, METHOD_BUFFERED, FILE_ANY_ACCESS)

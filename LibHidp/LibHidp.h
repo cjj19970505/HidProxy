@@ -1,6 +1,6 @@
 #pragma once
 
-typedef HANDLE HIDPHANDLE;
+typedef VOID* HIDPHANDLE;
 typedef HIDPHANDLE* PHIDPHANDLE;
 
 #ifdef LIBHIDP_EXPORTS
