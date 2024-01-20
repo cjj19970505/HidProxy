@@ -487,7 +487,17 @@ void GetMouseReportDataBuffer(uint8_t* buffer, uint8_t reportId, bool btn1, bool
     *reinterpret_cast<uint16_t*>(&buffer[4]) = y;
 }
 
+void OnSetFeature(HIDPHANDLE hidpHandle, UCHAR reportId, ULONG reportBufferLen, UCHAR* data)
+{
+    return;
+}
 
+void OnGetFeature(HIDPHANDLE hidpHandle, UCHAR reportId, ULONG bufferLength, PULONG pReportBufferLen, UCHAR* data)
+{
+    UCHAR featureReport[2] = { reportId, 0x15 };
+    *pReportBufferLen = 2;
+    CopyMemory(data, featureReport, sizeof(featureReport));
+}
 
 
 int main()
@@ -497,7 +507,7 @@ int main()
 
     HIDPHANDLE penTouchHidp = nullptr;
     
-    hr = HidpCreate(sizeof(PenTouchpadDescriptor), PenTouchpadDescriptor, &penTouchHidp);
+    hr = HidpCreate(sizeof(PenTouchpadDescriptor), PenTouchpadDescriptor, OnSetFeature, OnGetFeature, &penTouchHidp);
     do
     {
         

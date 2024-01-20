@@ -8,18 +8,20 @@
 
 using namespace winrt;
 
-struct NotifyThreadParams
-{
-	HANDLE CompletionPort;
-	HANDLE DeviceHandle;
-};
+
 
 struct HidpHandleImpl
 {
 	HANDLE DeviceHandle;
 	HANDLE NofiyThread;
-	HANDLE NotificationResultQueueMutex;
-	std::queue<Windows::Storage::Streams::Buffer> NotifyResultQueue;
+	PSET_FEATURE_ROUTINE SetFeatureRoutine;
+	PGET_FEATURE_ROUTINE GetFeatureRoutine;
+};
+
+struct NotifyThreadParams
+{
+	HANDLE CompletionPort;
+	HIDPHANDLE HidpHandle;
 };
 
 DWORD NotifyThreadProc(
@@ -27,6 +29,7 @@ DWORD NotifyThreadProc(
 )
 {
 	NotifyThreadParams* params = reinterpret_cast<NotifyThreadParams*>(lpParameter);
+	HidpHandleImpl* hidpHandle = reinterpret_cast<HidpHandleImpl*>(params->HidpHandle);
 
 	BOOL bStatus = TRUE;
 	DWORD bytesTransferred = 0;
@@ -43,7 +46,7 @@ DWORD NotifyThreadProc(
 			buffer.Length(0);
 			// BOOL registerResult = WriteFile(params->DeviceHandle, buffer.data(), buffer.Length(), NULL, &overlapped);
 			DWORD bytesReturn = 0;
-			bStatus = DeviceIoControl(params->DeviceHandle, IOCTL_REGISTER_NOTIFICATION, NULL, 0, buffer.data(), buffer.Capacity(), &bytesReturn, &overlapped);
+			bStatus = DeviceIoControl(hidpHandle->DeviceHandle, IOCTL_REGISTER_NOTIFICATION, NULL, 0, buffer.data(), buffer.Capacity(), &bytesReturn, &overlapped);
 			if (!bStatus)
 			{
 				auto err = GetLastError();
@@ -66,7 +69,7 @@ DWORD NotifyThreadProc(
 		{
 			needRegister = true;
 			DWORD bytesTransferred = 0;
-			bStatus = GetOverlappedResult(params->DeviceHandle, &overlapped, &bytesTransferred, FALSE);
+			bStatus = GetOverlappedResult(hidpHandle->DeviceHandle, &overlapped, &bytesTransferred, FALSE);
 			if (!bStatus)
 			{
 				auto err = GetLastError();
@@ -76,12 +79,69 @@ DWORD NotifyThreadProc(
 			CopyMemory(receivedBuffer.data(), buffer.data(), bytesTransferred);
 			receivedBuffer.Length(bytesTransferred);
 			HidpNotificationHeader* notification = reinterpret_cast<HidpNotificationHeader*>(receivedBuffer.data());
+
+			if (notification->NotificationType == HidpNotificationType::SetFeature)
+			{
+				Windows::Storage::Streams::Buffer completeNotificationBuffer{ sizeof(HidpCompleteNotificationHeader) };
+				ZeroMemory(completeNotificationBuffer.data(), completeNotificationBuffer.Capacity());
+				completeNotificationBuffer.Length(completeNotificationBuffer.Capacity());
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->NotificationType = notification->NotificationType;
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->HidTransferPacket = notification->HidTransferPacket;
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->VhfOperationHandle = notification->VhfOperationHandle;
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportId = notification->ReportId;
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportBufferLen = 0;
+
+				if (hidpHandle->SetFeatureRoutine != nullptr)
+				{
+					hidpHandle->SetFeatureRoutine(hidpHandle, notification->ReportId, notification->ReportBufferLen, notification->Data);
+					reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = 0L;
+				}
+				else
+				{
+					reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = 0xC00000BBL;
+				}
+				bStatus = DeviceIoControl(hidpHandle->DeviceHandle, IOCTL_COMPLETE_NOTIFIACTION, completeNotificationBuffer.data(), completeNotificationBuffer.Length(), NULL, 0, NULL, NULL);
+			}
+			else if (notification->NotificationType == HidpNotificationType::GetFeature)
+			{
+				Windows::Storage::Streams::Buffer completeNotificationBuffer{ static_cast<uint32_t>(sizeof(HidpCompleteNotificationHeader) + notification->ReportBufferLen) };
+				ZeroMemory(completeNotificationBuffer.data(), completeNotificationBuffer.Capacity());
+				completeNotificationBuffer.Length(completeNotificationBuffer.Capacity());
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->NotificationType = notification->NotificationType;
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->HidTransferPacket = notification->HidTransferPacket;
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->VhfOperationHandle = notification->VhfOperationHandle;
+				reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportId = notification->ReportId;
+				
+
+				if (hidpHandle->GetFeatureRoutine != nullptr)
+				{
+					hidpHandle->GetFeatureRoutine(
+						hidpHandle, 
+						notification->ReportId, 
+						notification->ReportBufferLen, 
+						&(reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportBufferLen), 
+						reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->Data
+					);
+					reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = 0L;
+				}
+				else
+				{
+					reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = 0xC00000BBL;
+				}
+				bStatus = DeviceIoControl(hidpHandle->DeviceHandle, IOCTL_COMPLETE_NOTIFIACTION, completeNotificationBuffer.data(), completeNotificationBuffer.Length(), NULL, 0, NULL, NULL);
+			}
+			
+			if (!bStatus)
+			{
+				auto err = GetLastError();
+				return err;
+			}
 		}
 	}
 	return ERROR_SUCCESS;
 }
 
-HRESULT HidpCreate(DWORD nReportDescriptorSize, LPCVOID lpReportDescriptor, PHIDPHANDLE pHidpHandle)
+HRESULT HidpCreate(DWORD nReportDescriptorSize, LPCVOID lpReportDescriptor, PSET_FEATURE_ROUTINE setFeatureRoutine, PGET_FEATURE_ROUTINE getFeatureRoutine, PHIDPHANDLE pHidpHandle)
 {
 	ULONG deviceInterfaceListLength = 0;
 	CONFIGRET cr = CR_SUCCESS;
@@ -100,6 +160,9 @@ HRESULT HidpCreate(DWORD nReportDescriptorSize, LPCVOID lpReportDescriptor, PHID
 	ZeroMemory(deviceInterfaceListBuffer.data(), deviceInterfaceListBuffer.Capacity());
 
 	HRESULT hr = S_OK;
+	*pHidpHandle = new HidpHandleImpl();
+	ZeroMemory(*pHidpHandle, sizeof(HidpHandleImpl));
+	
 	do
 	{
 		cr = CM_Get_Device_Interface_List((LPGUID)(&GUID_DEVINTERFACE_HIDP), nullptr, reinterpret_cast<PZZWSTR>(deviceInterfaceListBuffer.data()), deviceInterfaceListLength, CM_GET_DEVICE_INTERFACE_LIST_PRESENT);
@@ -119,13 +182,18 @@ HRESULT HidpCreate(DWORD nReportDescriptorSize, LPCVOID lpReportDescriptor, PHID
 		}
 		NotifyThreadParams* threadParams = new NotifyThreadParams();
 		threadParams->CompletionPort = completionPort;
-		threadParams->DeviceHandle = deviceHandle;
-		HANDLE notifyThread = CreateThread(NULL, 0, NotifyThreadProc, threadParams, 0, NULL);
-		if (notifyThread == INVALID_HANDLE_VALUE)
+		threadParams->HidpHandle = *pHidpHandle;
+		HANDLE notifyThread = CreateThread(NULL, 0, NotifyThreadProc, threadParams, CREATE_SUSPENDED, NULL);
+		if (notifyThread == INVALID_HANDLE_VALUE || notifyThread == NULL)
 		{
 			hr = E_UNEXPECTED;
 			break;
 		}
+
+		reinterpret_cast<HidpHandleImpl*>(*pHidpHandle)->DeviceHandle = deviceHandle;
+		reinterpret_cast<HidpHandleImpl*>(*pHidpHandle)->NofiyThread = notifyThread;
+		reinterpret_cast<HidpHandleImpl*>(*pHidpHandle)->SetFeatureRoutine = setFeatureRoutine;
+		reinterpret_cast<HidpHandleImpl*>(*pHidpHandle)->GetFeatureRoutine = getFeatureRoutine;
 
 		Windows::Storage::Streams::Buffer createVHidRequestBuffer{ static_cast<uint32_t>(nReportDescriptorSize + sizeof(HidpQueueRequestHeader)) };
 		createVHidRequestBuffer.Length(createVHidRequestBuffer.Capacity());
@@ -141,6 +209,11 @@ HRESULT HidpCreate(DWORD nReportDescriptorSize, LPCVOID lpReportDescriptor, PHID
 			hr = winrt::impl::hresult_from_win32(error);
 			break;
 		}
+		DWORD suspendCount = ResumeThread(notifyThread);
+
+		// TODO
+		// resume thread error check
+
 		BOOL writeResult = WriteFile(deviceHandle, createVHidRequestBuffer.data(), createVHidRequestBuffer.Length(), NULL, &overlapped);
 		
 		if (!writeResult)
@@ -159,10 +232,6 @@ HRESULT HidpCreate(DWORD nReportDescriptorSize, LPCVOID lpReportDescriptor, PHID
 			hr = winrt::impl::hresult_from_win32(waitResult);
 			break;
 		}
-
-		*pHidpHandle = new HidpHandleImpl();
-		reinterpret_cast<HidpHandleImpl*>(*pHidpHandle)->DeviceHandle = deviceHandle;
-		reinterpret_cast<HidpHandleImpl*>(*pHidpHandle)->NofiyThread = notifyThread;
 
 	} while (false);
 

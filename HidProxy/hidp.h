@@ -25,7 +25,7 @@ struct HidQueueRequestSubmitReport
 	UCHAR ReportData[0];
 };
 
-struct HidQueueSetFeatureCompletionInfo
+struct HidQueueCompleteSetFeatureInfo
 {
 	VOID* VhfOperationHandle;
 	LONG Status;
@@ -33,14 +33,28 @@ struct HidQueueSetFeatureCompletionInfo
 
 enum class HidpNotificationType
 {
-	GetFeature = 0, SetFeature = 1, WriteReport = 2
+	GetFeature = 0, SetFeature = 1, WriteReport = 2, GetInputReport = 3
 };
 
 #pragma warning(disable : 4200)
 struct HidpNotificationHeader
 {
+	// Theses 3 fields should be transferred back to driver when completing notifications.
 	HidpNotificationType NotificationType;
+	VOID* HidTransferPacket;
 	VOID* VhfOperationHandle;
+	
+	UCHAR ReportId;
+	ULONG ReportBufferLen;
+	UCHAR Data[0];
+};
+
+struct HidpCompleteNotificationHeader
+{
+	HidpNotificationType NotificationType;
+	VOID* HidTransferPacket;
+	VOID* VhfOperationHandle;
+	LONG CompletionStatus;
 	UCHAR ReportId;
 	ULONG ReportBufferLen;
 	UCHAR Data[0];
@@ -52,3 +66,4 @@ struct HidpNotificationHeader
 //
 #define FILE_DEVICE_INVERTED 0xCF54
 #define IOCTL_REGISTER_NOTIFICATION CTL_CODE(FILE_DEVICE_INVERTED, 2049, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_COMPLETE_NOTIFIACTION CTL_CODE(FILE_DEVICE_INVERTED, 2050, METHOD_BUFFERED, FILE_ANY_ACCESS)
