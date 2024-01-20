@@ -13,9 +13,14 @@
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="Class.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
+    <ClCompile Include="GetFeatureRequest.cpp" />
+    <ClCompile Include="SetFeatureRequest.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
+    <ClInclude Include="..\HidProxy\hidp.h" />
+    <ClInclude Include="SetFeatureRequest.h" />
+    <ClInclude Include="GetFeatureRequest.h" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="Class.idl" />

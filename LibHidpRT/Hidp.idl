@@ -1,8 +1,23 @@
 namespace LibHidpRT
 {
-	runtimeclass Hidp: Windows.Foundation.IClosable
+	runtimeclass GetFeatureRequest
+	{
+		UInt8 ReportId{ get; };
+	};
+
+	runtimeclass SetFeatureRequest
+	{
+		UInt8 ReportId{ get; };
+		Windows.Storage.Streams.IBuffer ReportBuffer{ get; };
+	};
+
+	runtimeclass Hidp : Windows.Foundation.IClosable
 	{
 		static Windows.Foundation.IAsyncOperation<Hidp> CreateAsync(Windows.Storage.Streams.Buffer reportDescriptor);
 		Windows.Foundation.IAsyncAction SubmitReportAsync(UInt8 reportId, Windows.Storage.Streams.IBuffer reportData);
-	}
+		event Windows.Foundation.EventHandler<GetFeatureRequest> OnGetFeatureRequest;
+		event Windows.Foundation.EventHandler<SetFeatureRequest> OnSetFeatureRequest;
+		Windows.Foundation.IAsyncAction CompleteGetFeatureRequestAsync(GetFeatureRequest request, Windows.Storage.Streams.IBuffer reportBuffer, Boolean supported);
+		Windows.Foundation.IAsyncAction CompleteSetFeatureRequestAsync(SetFeatureRequest request, Boolean supported);
+	};
 }
