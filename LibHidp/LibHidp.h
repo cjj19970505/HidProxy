@@ -15,6 +15,8 @@ typedef void (*PGET_FEATURE_ROUTINE)(HIDPHANDLE hidpHandle, UCHAR reportId, ULON
 
 LIBHIDP_API HRESULT HidpCreate(DWORD reportDescriptorSize, LPCVOID reportDescriptor, PSET_FEATURE_ROUTINE setFeatureRoutine, PGET_FEATURE_ROUTINE getFeatureRoutine, PHIDPHANDLE pHidpHandle);
 
+LIBHIDP_API BOOL HidpStart(HIDPHANDLE hidpHandle);
+
 LIBHIDP_API BOOL HidpClose(HIDPHANDLE hidpHandle);
 
 LIBHIDP_API HRESULT HidpSubmitReport(HIDPHANDLE hidpHandle, UCHAR reportId, SIZE_T reportSize, PBYTE reportData);

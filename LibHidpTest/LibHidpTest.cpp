@@ -489,11 +489,13 @@ void GetMouseReportDataBuffer(uint8_t* buffer, uint8_t reportId, bool btn1, bool
 
 void OnSetFeature(HIDPHANDLE hidpHandle, UCHAR reportId, ULONG reportBufferLen, UCHAR* data)
 {
+    std::cout << "SetFeature:" << static_cast<int32_t>(reportId) << std::endl;
     return;
 }
 
 void OnGetFeature(HIDPHANDLE hidpHandle, UCHAR reportId, ULONG bufferLength, PULONG pReportBufferLen, UCHAR* data)
 {
+    std::cout << "GetFeature:" << static_cast<int32_t>(reportId) << std::endl;
     UCHAR featureReport[2] = { reportId, 0x15 };
     *pReportBufferLen = 2;
     CopyMemory(data, featureReport, sizeof(featureReport));
@@ -508,6 +510,7 @@ int main()
     HIDPHANDLE penTouchHidp = nullptr;
     
     hr = HidpCreate(sizeof(PenTouchpadDescriptor), PenTouchpadDescriptor, OnSetFeature, OnGetFeature, &penTouchHidp);
+    BOOL b = HidpStart(penTouchHidp);
     do
     {
         
@@ -533,7 +536,7 @@ int main()
             y %= 15981;
             GetPenReportDataBuffer(PenReportDataBuffer, REPORTID_PEN, penReportByte1, x, y, 0, 0, 0);
             hr = HidpSubmitReport(penTouchHidp, 1, sizeof(PenReportDataBuffer), PenReportDataBuffer);
-            std::cout << x << std::endl;
+            // std::cout << x << std::endl;
             Sleep(1);
         }
         
@@ -559,7 +562,7 @@ int main()
             y %= 4096;
             GetTouchReportDataBuffer(TouchReportDataBuffer, REPORTID_TOUCHPAD, touchReportByte1, x, y, 10, 1, 0);
             hr = HidpSubmitReport(penTouchHidp, 1, sizeof(TouchReportDataBuffer), TouchReportDataBuffer);
-            std::cout << x << std::endl;
+            // std::cout << x << std::endl;
             Sleep(1);
         }
     } while (false);

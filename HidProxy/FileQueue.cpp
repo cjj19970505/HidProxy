@@ -118,12 +118,6 @@ HidProxyFileQueueIoWrite(
 				WdfRequestComplete(Request, status);
 				break;
 			}
-			status = VhfStart(vhfHandle);
-			if (!NT_SUCCESS(status))
-			{
-				WdfRequestComplete(Request, status);
-				break;
-			}
 			fileContext->VhfHandle = vhfHandle;
 			WdfRequestComplete(Request, STATUS_SUCCESS);
 			break;
@@ -183,12 +177,21 @@ HidProxyFileQueueIoDeviceControl(
 
 	WDFFILEOBJECT file = WdfRequestGetFileObject(Request);
 	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(file);
-
-	if (IoControlCode == IOCTL_REGISTER_NOTIFICATION)
+	if (IoControlCode == IOCTL_HIDPROXY_START_VHID) 
+	{
+		if (fileContext->VhfHandle == NULL)
+		{
+			WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
+			return;
+		}
+		status = VhfStart(fileContext->VhfHandle);
+		WdfRequestComplete(Request, status);
+	}
+	else if (IoControlCode == IOCTL_HIDPROXY_REGISTER_NOTIFICATION)
 	{
 		status = WdfRequestForwardToIoQueue(Request, fileContext->NotificationQueue);
 	}
-	else if (IoControlCode == IOCTL_COMPLETE_NOTIFIACTION)
+	else if (IoControlCode == IOCTL_HIDPROXY_COMPLETE_NOTIFIACTION)
 	{
 		WDFMEMORY inputMemory;
 		status = WdfRequestRetrieveInputMemory(Request, &inputMemory);

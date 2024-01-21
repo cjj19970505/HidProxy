@@ -34,6 +34,10 @@ NTSTATUS HidProxyDeviceCreate(PWDFDEVICE_INIT DeviceInit)
 	//fileObjectAttributes.SynchronizationScope = WdfSynchronizationScopeDevice;
 	WdfDeviceInitSetFileObjectConfig(DeviceInit, &fileObjectConfig, &fileObjectAttributes);
 
+	// I need to define my IOCTL codes
+	// which needs a devicetype that is the same as the one set in device object.
+	WdfDeviceInitSetDeviceType(DeviceInit, FILE_DEVICE_HIDPROXY);
+
 	WDFDEVICE device;
 	status = WdfDeviceCreate(&DeviceInit, &deviceAttributes, &device);
 
