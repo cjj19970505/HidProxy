@@ -211,6 +211,9 @@ namespace LibHidpTestSharp
                 await stream.WriteAsync(PenTouchpadDescriptor);
             }
             var hidp = await Hidp.CreateAsync(reportDescriptorBuffer);
+            hidp.OnSetFeatureRequest += Hidp_OnSetFeatureRequest;
+            hidp.OnGetFeatureRequest += Hidp_OnGetFeatureRequest;
+            await hidp.StartAsync();
 
             UInt16 x = 0;
             UInt16 y = 0;
@@ -221,13 +224,42 @@ namespace LibHidpTestSharp
                 y += 1;
                 y %= 15981;
 
-                var penReportBuffer = writePenReportDatabuffer(1, false, false, false, false, true, x, y, 0, 0, 0);
+                var penReportBuffer = writePenReportDatabuffer(REPORTID_PEN, false, false, false, false, true, x, y, 0, 0, 0);
                 await hidp.SubmitReportAsync(1, penReportBuffer);
                 await Task.Delay(1);
             }
 
             hidp.Dispose();
             
+        }
+
+        private static async void Hidp_OnGetFeatureRequest(object? sender, GetFeatureRequest e)
+        {
+            Debug.WriteLine($"GetFeature: {e.ReportId}");
+            Hidp? hidp = sender as Hidp;
+            if(hidp == null)
+            {
+                return;
+            }
+            var report = new byte[] { e.ReportId, 0x15 };
+            var reportBuffer = new Windows.Storage.Streams.Buffer(2);
+            using (var stream = reportBuffer.AsStream())
+            {
+                await stream.WriteAsync(report);
+            }
+            reportBuffer.Length = reportBuffer.Capacity;
+            await hidp.CompleteGetFeatureRequestAsync(e, reportBuffer, true);
+        }
+
+        private static async void Hidp_OnSetFeatureRequest(object? sender, SetFeatureRequest e)
+        {
+            Debug.WriteLine($"SetFeature: {e.ReportId}");
+            Hidp? hidp = sender as Hidp;
+            if (hidp == null)
+            {
+                return;
+            }
+            await hidp.CompleteSetFeatureRequestAsync(e, true);
         }
 
         static IBuffer writePenReportDatabuffer(Byte reportId, bool tipSwitch, bool barrelSwitch, bool invert, bool eraserSwitch, bool inRange, UInt16 x, UInt16 y, UInt16 tipPressure, Byte xTilt, Byte yTilt)

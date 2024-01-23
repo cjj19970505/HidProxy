@@ -11,31 +11,120 @@
 using namespace winrt::Windows::Storage::Streams;
 namespace winrt::LibHidpRT::implementation
 {
+	struct NotifyThreadParams
+	{
+		implementation::Hidp* Hidp;
+	};
+	DWORD Hidp::NotifyThreadProc(
+		_In_ LPVOID lpParameter
+	)
+	{
+		NotifyThreadParams* params = reinterpret_cast<NotifyThreadParams*>(lpParameter);
+		BOOL bStatus = TRUE;
+		DWORD bytesTransferred = 0;
+		Windows::Storage::Streams::Buffer buffer{ 1024 };
+		OVERLAPPED overlapped{};
+
+		// although we don't use this event, but document says:
+		// https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-deviceiocontrol#parameters
+		// If hDevice was opened with the FILE_FLAG_OVERLAPPED flag, the operation is performed as an overlapped (asynchronous) operation. In this case, lpOverlapped must point to a valid OVERLAPPED structure that contains a handle to an event object. Otherwise, the function fails in unpredictable ways.
+		overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+		bool needRegister = true;
+		while (true)
+		{
+			if (needRegister)
+			{
+				ZeroMemory(buffer.data(), buffer.Capacity());
+				buffer.Length(0);
+				DWORD bytesReturn = 0;
+				ResetEvent(overlapped.hEvent);
+				bStatus = DeviceIoControl(params->Hidp->_HidpHandle, IOCTL_HIDPROXY_REGISTER_NOTIFICATION, NULL, 0, buffer.data(), buffer.Capacity(), &bytesReturn, &overlapped);
+				if (!bStatus)
+				{
+					auto err = GetLastError();
+					if (err != ERROR_IO_PENDING)
+					{
+						check_win32(err);
+					}
+				}
+
+				needRegister = false;
+			}
+
+			ULONG_PTR completionKey = NULL;
+			LPOVERLAPPED getQueuedCompletionStatusOverlapped = NULL;
+			bStatus = GetQueuedCompletionStatus(params->Hidp->_NotificationCompletionPort, &bytesTransferred, &completionKey, &getQueuedCompletionStatusOverlapped, INFINITE);
+			if (!bStatus)
+			{
+				auto err = GetLastError();
+				check_win32(err);
+			}
+			if (&overlapped == getQueuedCompletionStatusOverlapped)
+			{
+				needRegister = true;
+				DWORD bytesTransferred = 0;
+				bStatus = GetOverlappedResult(params->Hidp->_HidpHandle, &overlapped, &bytesTransferred, FALSE);
+				if (!bStatus)
+				{
+					auto err = GetLastError();
+					check_win32(err);
+				}
+
+				Windows::Storage::Streams::Buffer receivedBuffer{ bytesTransferred };
+				CopyMemory(receivedBuffer.data(), buffer.data(), bytesTransferred);
+				receivedBuffer.Length(bytesTransferred);
+				HidpNotificationHeader* notification = reinterpret_cast<HidpNotificationHeader*>(receivedBuffer.data());
+
+				if (notification->NotificationType == HidpNotificationType::SetFeature)
+				{
+					Windows::Storage::Streams::Buffer reportBuffer{ notification->ReportBufferLen };
+					CopyMemory(reportBuffer.data(), notification->Data, notification->ReportBufferLen);
+					reportBuffer.Length(reportBuffer.Capacity());
+					auto request = make<implementation::SetFeatureRequest>(notification->ReportId, notification->HidTransferPacket, notification->VhfOperationHandle, reportBuffer);
+					if (params->Hidp->_OnSetFeatureRequestEvent)
+					{
+						params->Hidp->_OnSetFeatureRequestEvent(*params->Hidp, request);
+					}
+					else
+					{
+						params->Hidp->CompleteSetFeatureRequest(request, false);
+					}
+				}
+				else if (notification->NotificationType == HidpNotificationType::GetFeature)
+				{
+					auto request = make<implementation::GetFeatureRequest>(notification->ReportId, notification->HidTransferPacket, notification->VhfOperationHandle);
+					if (params->Hidp->_OnGetFeatureRequestEvent)
+					{
+						params->Hidp->_OnGetFeatureRequestEvent(*params->Hidp, request);
+					}
+					else
+					{
+						params->Hidp->CompleteGetFeatureRequest(request, nullptr, false);
+					}
+				}
+				else
+				{
+					check_win32(ERROR_NOT_SUPPORTED);
+				}
+			}
+		}
+		CloseHandle(overlapped.hEvent);
+	}
 
 	Windows::Foundation::IAsyncAction WriteFileAsync(HANDLE handle, const Buffer buffer)
 	{
-		co_await resume_background();
 		BOOL bStatus = TRUE;
 		OVERLAPPED overlapped{};
 		overlapped.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-
-		auto overlappedRoutine = [](
-			_In_    DWORD dwErrorCode,
-			_In_    DWORD dwNumberOfBytesTransfered,
-			_Inout_ LPOVERLAPPED lpOverlapped
-			)
-			{
-				BOOL bResult = TRUE;
-				bResult = SetEvent(lpOverlapped->hEvent);
-				if (!bResult)
-				{
-					check_win32(GetLastError());
-				}
-			};
-		bStatus = WriteFileEx(handle, buffer.data(), buffer.Length(), &overlapped, overlappedRoutine);
+		bStatus = WriteFile(handle, buffer.data(), buffer.Length(), NULL, &overlapped);
 		if (!bStatus)
 		{
-			bStatus = CloseHandle(overlapped.hEvent);
+			auto err = GetLastError();
+			if (err != ERROR_IO_PENDING)
+			{
+				bStatus = CloseHandle(overlapped.hEvent);
+				check_win32(err);
+			}
 		}
 		co_await resume_on_signal(overlapped.hEvent);
 		bStatus = CloseHandle(overlapped.hEvent);
@@ -125,7 +214,7 @@ namespace winrt::LibHidpRT::implementation
 				hr = E_UNEXPECTED;
 				break;
 			}
-			HANDLE deviceHandle = CreateFile(reinterpret_cast<LPCWSTR>(deviceInterfaceListBuffer.data()), GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+			HANDLE deviceHandle = CreateFile(reinterpret_cast<LPCWSTR>(deviceInterfaceListBuffer.data()), GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
 			if (deviceHandle == INVALID_HANDLE_VALUE)
 			{
 				hr = E_UNEXPECTED;
@@ -160,6 +249,10 @@ namespace winrt::LibHidpRT::implementation
 		co_await hidpAbi->InitAsync(reportDescriptor);
 		co_return hidp;
     }
+	winrt::Windows::Foundation::IAsyncAction Hidp::StartAsync()
+	{
+		co_await DeviceIoControlAsync(_HidpHandle, IOCTL_HIDPROXY_START_VHID, nullptr, nullptr);
+	}
     winrt::Windows::Foundation::IAsyncAction Hidp::SubmitReportAsync(uint8_t reportId, winrt::Windows::Storage::Streams::IBuffer reportData)
     {
 		Windows::Storage::Streams::Buffer submitReportRequest{ static_cast<uint32_t>(reportData.Length() + sizeof(HidQueueRequestSubmitReport) + sizeof(HidpQueueRequestHeader))};
@@ -206,7 +299,7 @@ namespace winrt::LibHidpRT::implementation
 			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportId = requestAbi->ReportId();
 			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportBufferLen = 0;
 			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = REQUEST_NOT_SUPPORTED;
-			co_await DeviceIoControlAsync(_HidpHandle, IOCTL_COMPLETE_NOTIFIACTION, completeNotificationBuffer, nullptr);
+			co_await DeviceIoControlAsync(_HidpHandle, IOCTL_HIDPROXY_COMPLETE_NOTIFIACTION, completeNotificationBuffer, nullptr);
 		}
 		else
 		{
@@ -220,7 +313,7 @@ namespace winrt::LibHidpRT::implementation
 			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportBufferLen = reportBuffer.Length();
 			CopyMemory(reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->Data, reportBuffer.data(), reportBuffer.Length());
 			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = 0;
-			co_await DeviceIoControlAsync(_HidpHandle, IOCTL_COMPLETE_NOTIFIACTION, completeNotificationBuffer, nullptr);
+			co_await DeviceIoControlAsync(_HidpHandle, IOCTL_HIDPROXY_COMPLETE_NOTIFIACTION, completeNotificationBuffer, nullptr);
 		}
 
 	}
@@ -243,7 +336,7 @@ namespace winrt::LibHidpRT::implementation
 		{
 			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = REQUEST_NOT_SUPPORTED;
 		}
-		co_await DeviceIoControlAsync(_HidpHandle, IOCTL_COMPLETE_NOTIFIACTION, completeNotificationBuffer, nullptr);
+		co_await DeviceIoControlAsync(_HidpHandle, IOCTL_HIDPROXY_COMPLETE_NOTIFIACTION, completeNotificationBuffer, nullptr);
 	}
 
     void Hidp::Close()
@@ -255,17 +348,83 @@ namespace winrt::LibHidpRT::implementation
 		}
     }
 
-	Windows::Foundation::IAsyncAction Hidp::InitAsync(winrt::Windows::Storage::Streams::Buffer reportDescriptor)
+	void Hidp::CompleteSetFeatureRequest(winrt::LibHidpRT::SetFeatureRequest request, bool supported)
 	{
 		BOOL bStatus = TRUE;
-
-		HANDLE notificationRegisteredHandle = CreateEvent(NULL, FALSE, FALSE, NULL);
-		if (notificationRegisteredHandle == NULL)
+		Buffer completeNotificationBuffer{ sizeof(HidpCompleteNotificationHeader) };
+		ZeroMemory(completeNotificationBuffer.data(), completeNotificationBuffer.Capacity());
+		completeNotificationBuffer.Length(completeNotificationBuffer.Capacity());
+		auto requestAbi = request.as<implementation::SetFeatureRequest>();
+		reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->NotificationType = HidpNotificationType::SetFeature;
+		reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->HidTransferPacket = requestAbi->HidTransferPacket();
+		reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->VhfOperationHandle = requestAbi->VhfOperationHandle();
+		reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportId = requestAbi->ReportId();
+		reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportBufferLen = 0;
+		if (supported)
 		{
-			check_win32(GetLastError());
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = 0L;
 		}
-		_NotificationTask = _RegisterForNotificationAsync(notificationRegisteredHandle);
-		
+		else
+		{
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = REQUEST_NOT_SUPPORTED;
+		}
+		bStatus = DeviceIoControl(_HidpHandle, IOCTL_HIDPROXY_COMPLETE_NOTIFIACTION, completeNotificationBuffer.data(), completeNotificationBuffer.Length(), NULL, 0, NULL, NULL);
+		if (!bStatus)
+		{
+			auto err = GetLastError();
+			check_win32(err);
+		}
+	}
+
+	void Hidp::CompleteGetFeatureRequest(winrt::LibHidpRT::GetFeatureRequest request, winrt::Windows::Storage::Streams::IBuffer reportBuffer, bool supported)
+	{
+		BOOL bStatus = TRUE;
+		auto requestAbi = request.as<implementation::GetFeatureRequest>();
+		if (request == nullptr || !supported)
+		{
+			Buffer completeNotificationBuffer{ static_cast<uint32_t>(sizeof(HidpCompleteNotificationHeader)) };
+			ZeroMemory(completeNotificationBuffer.data(), completeNotificationBuffer.Capacity());
+			completeNotificationBuffer.Length(completeNotificationBuffer.Capacity());
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->NotificationType = HidpNotificationType::GetFeature;
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->HidTransferPacket = requestAbi->HidTransferPacket();
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->VhfOperationHandle = requestAbi->VhfOperationHandle();
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportId = requestAbi->ReportId();
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportBufferLen = 0;
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = REQUEST_NOT_SUPPORTED;
+			bStatus = DeviceIoControl(_HidpHandle, IOCTL_HIDPROXY_COMPLETE_NOTIFIACTION, completeNotificationBuffer.data(), completeNotificationBuffer.Length(), NULL, 0, NULL, NULL);
+		}
+		else
+		{
+			Buffer completeNotificationBuffer{ static_cast<uint32_t>(sizeof(HidpCompleteNotificationHeader) + reportBuffer.Length()) };
+			ZeroMemory(completeNotificationBuffer.data(), completeNotificationBuffer.Capacity());
+			completeNotificationBuffer.Length(completeNotificationBuffer.Capacity());
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->NotificationType = HidpNotificationType::GetFeature;
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->HidTransferPacket = requestAbi->HidTransferPacket();
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->VhfOperationHandle = requestAbi->VhfOperationHandle();
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportId = requestAbi->ReportId();
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->ReportBufferLen = reportBuffer.Length();
+			CopyMemory(reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->Data, reportBuffer.data(), reportBuffer.Length());
+			reinterpret_cast<HidpCompleteNotificationHeader*>(completeNotificationBuffer.data())->CompletionStatus = 0;
+			bStatus = DeviceIoControl(_HidpHandle, IOCTL_HIDPROXY_COMPLETE_NOTIFIACTION, completeNotificationBuffer.data(), completeNotificationBuffer.Length(), NULL, 0, NULL, NULL);
+		}
+		if (!bStatus)
+		{
+			auto err = GetLastError();
+			check_win32(err);
+		}
+	}
+
+	Windows::Foundation::IAsyncAction Hidp::InitAsync(winrt::Windows::Storage::Streams::Buffer reportDescriptor)
+	{
+
+		// TODO
+		// need to delete params
+		NotifyThreadParams* params = new NotifyThreadParams();
+		params->Hidp = this;
+
+		// TODO
+		// need to stop the thread when closing the hidp
+		CreateThread(NULL, 0, NotifyThreadProc, params, 0, NULL);
 
 		Windows::Storage::Streams::Buffer createVHidRequestBuffer{ static_cast<uint32_t>(reportDescriptor.Length() + sizeof(HidpQueueRequestHeader)) };
 		createVHidRequestBuffer.Length(createVHidRequestBuffer.Capacity());
@@ -273,102 +432,8 @@ namespace winrt::LibHidpRT::implementation
 		reinterpret_cast<HidpQueueRequestHeader*>(createVHidRequestBuffer.data())->RequestType = HidpQueueWriteRequestType::CreateVHid;
 		reinterpret_cast<HidpQueueRequestHeader*>(createVHidRequestBuffer.data())->Size = static_cast<USHORT>(reportDescriptor.Length());
 		CopyMemory(createVHidRequestBuffer.data() + offsetof(HidpQueueRequestHeader, Data), reportDescriptor.data(), reportDescriptor.Length());
-
-		// Start Vhid after IOCTL_REGISTER_NOTIFICATION
-		co_await resume_on_signal(notificationRegisteredHandle);
-		bStatus = CloseHandle(notificationRegisteredHandle);
-		if (!bStatus)
-		{
-			check_win32(GetLastError());
-		}
 		
 		co_await WriteFileAsync(_HidpHandle, createVHidRequestBuffer);
-	}
-
-	winrt::Windows::Foundation::IAsyncAction Hidp::_RegisterForNotificationAsync(HANDLE notificationRegisteredHandle)
-	{
-		co_await resume_background();
-		BOOL bStatus = TRUE;
-		HANDLE initNotificationRegisteredHandle = notificationRegisteredHandle;
-		DWORD bytesTransferred = 0;
-		Windows::Storage::Streams::Buffer buffer{ 1024 };
-		OVERLAPPED overlapped{};
-		bool needRegister = true;
-		while (true)
-		{
-			if (needRegister)
-			{
-				ZeroMemory(&overlapped, sizeof(OVERLAPPED));
-				ZeroMemory(buffer.data(), buffer.Capacity());
-				buffer.Length(0);
-				DWORD bytesReturn = 0;
-				bStatus = DeviceIoControl(_HidpHandle, IOCTL_REGISTER_NOTIFICATION, NULL, 0, buffer.data(), buffer.Capacity(), &bytesReturn, &overlapped);
-				if (!bStatus)
-				{
-					auto err = GetLastError();
-					if (err != ERROR_IO_PENDING)
-					{
-						check_win32(err);
-					}
-				}
-				if (initNotificationRegisteredHandle != NULL)
-				{
-					bStatus = SetEvent(initNotificationRegisteredHandle);
-					initNotificationRegisteredHandle = NULL;
-				}
-				if (!bStatus)
-				{
-					auto err = GetLastError();
-					check_win32(err);
-				}
-				needRegister = false;
-			}
-
-			ULONG_PTR completionKey = NULL;
-			LPOVERLAPPED getQueuedCompletionStatusOverlapped = NULL;
-			bStatus = GetQueuedCompletionStatus(_NotificationCompletionPort, &bytesTransferred, &completionKey, &getQueuedCompletionStatusOverlapped, INFINITE);
-			if (!bStatus)
-			{
-				auto err = GetLastError();
-				check_win32(err);
-			}
-			if (&overlapped == getQueuedCompletionStatusOverlapped)
-			{
-				needRegister = true;
-				DWORD bytesTransferred = 0;
-				bStatus = GetOverlappedResult(_HidpHandle, &overlapped, &bytesTransferred, FALSE);
-				if (!bStatus)
-				{
-					auto err = GetLastError();
-					check_win32(err);
-				}
-
-				Windows::Storage::Streams::Buffer receivedBuffer{ bytesTransferred };
-				CopyMemory(receivedBuffer.data(), buffer.data(), bytesTransferred);
-				receivedBuffer.Length(bytesTransferred);
-				HidpNotificationHeader* notification = reinterpret_cast<HidpNotificationHeader*>(receivedBuffer.data());
-				
-				if (notification->NotificationType == HidpNotificationType::SetFeature)
-				{
-					if (_OnGetFeatureRequestEvent)
-					{
-						Windows::Storage::Streams::Buffer reportBuffer{ notification->ReportBufferLen };
-						CopyMemory(reportBuffer.data(), notification->Data, notification->ReportBufferLen);
-						reportBuffer.Length(reportBuffer.Capacity());
-						auto request = make<implementation::SetFeatureRequest>(notification->ReportId, notification->HidTransferPacket, notification->VhfOperationHandle, reportBuffer);
-						_OnSetFeatureRequestEvent(*this, request);
-					}
-				}
-				else if (notification->NotificationType == HidpNotificationType::GetFeature)
-				{
-					if (_OnGetFeatureRequestEvent)
-					{
-						auto request = make<implementation::GetFeatureRequest>(notification->ReportId, notification->HidTransferPacket, notification->VhfOperationHandle);
-						_OnGetFeatureRequestEvent(*this, request);
-					}
-				}
-			}
-		}
 	}
 
 }

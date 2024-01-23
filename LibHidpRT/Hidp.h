@@ -25,6 +25,7 @@ namespace winrt::LibHidpRT::implementation
         Hidp(HANDLE hidpHandle, HANDLE notificationCompletionPort);
 
         static winrt::Windows::Foundation::IAsyncOperation<winrt::LibHidpRT::Hidp> CreateAsync(winrt::Windows::Storage::Streams::Buffer reportDescriptor);
+        winrt::Windows::Foundation::IAsyncAction StartAsync();
         winrt::Windows::Foundation::IAsyncAction SubmitReportAsync(uint8_t reportId, winrt::Windows::Storage::Streams::IBuffer reportData);
         winrt::event_token OnGetFeatureRequest(winrt::Windows::Foundation::EventHandler<winrt::LibHidpRT::GetFeatureRequest> const& handler);
         void OnGetFeatureRequest(winrt::event_token const& token) noexcept;
@@ -34,12 +35,14 @@ namespace winrt::LibHidpRT::implementation
         winrt::Windows::Foundation::IAsyncAction CompleteSetFeatureRequestAsync(winrt::LibHidpRT::SetFeatureRequest request, bool supported);
         void Close();
 
+        void CompleteGetFeatureRequest(winrt::LibHidpRT::GetFeatureRequest request, winrt::Windows::Storage::Streams::IBuffer reportBuffer, bool supported);
+        void CompleteSetFeatureRequest(winrt::LibHidpRT::SetFeatureRequest request, bool supported);
+
     private:
         Windows::Foundation::IAsyncAction InitAsync(winrt::Windows::Storage::Streams::Buffer reportDescriptor);
-        winrt::Windows::Foundation::IAsyncAction _RegisterForNotificationAsync(HANDLE notificationRegisteredHandle);
+        static DWORD NotifyThreadProc(_In_ LPVOID lpParameter);
         HANDLE _HidpHandle = NULL;
         HANDLE _NotificationCompletionPort;
-        Windows::Foundation::IAsyncAction _NotificationTask = nullptr;
 
         winrt::event<Windows::Foundation::EventHandler<winrt::LibHidpRT::GetFeatureRequest>> _OnGetFeatureRequestEvent;
         winrt::event<Windows::Foundation::EventHandler<winrt::LibHidpRT::SetFeatureRequest>> _OnSetFeatureRequestEvent;
