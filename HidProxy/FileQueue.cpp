@@ -336,8 +336,8 @@ HidProxyFileQueueIoDeviceControl(
 		}
 		if (inputBuffer->NotificationType == HidpNotificationType::SetFeature || inputBuffer->NotificationType == HidpNotificationType::WriteReport)
 		{
-			status = VhfAsyncOperationComplete(inputBuffer->VhfOperationHandle, inputBuffer->CompletionStatus);
-			WdfRequestComplete(Request, status);
+			VhfAsyncOperationComplete(inputBuffer->VhfOperationHandle, inputBuffer->CompletionStatus);
+			WdfRequestComplete(Request, STATUS_SUCCESS);
 		}
 		else if (inputBuffer->NotificationType == HidpNotificationType::GetFeature || inputBuffer->NotificationType == HidpNotificationType::GetInputReport)
 		{
@@ -346,8 +346,8 @@ HidProxyFileQueueIoDeviceControl(
 				RtlCopyMemory(reinterpret_cast<PHID_XFER_PACKET>(inputBuffer->HidTransferPacket)->reportBuffer, inputBuffer->Data, inputBuffer->ReportBufferLen);
 				reinterpret_cast<PHID_XFER_PACKET>(inputBuffer->HidTransferPacket)->reportBufferLen = inputBuffer->ReportBufferLen;
 			}
-			status = VhfAsyncOperationComplete(inputBuffer->VhfOperationHandle, inputBuffer->CompletionStatus);
-			WdfRequestComplete(Request, status);
+			VhfAsyncOperationComplete(inputBuffer->VhfOperationHandle, inputBuffer->CompletionStatus);
+			WdfRequestComplete(Request, STATUS_SUCCESS);
 		}
 		else
 		{
