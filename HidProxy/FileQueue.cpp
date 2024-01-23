@@ -17,6 +17,15 @@ typedef struct _VHF_CLIENT_CONTEXT
 	WDFFILEOBJECT FileObject;
 } VHF_CLIENT_CONTEXT, * PVHF_CLIENT_CONTEXT;
 
+typedef struct _PENDING_NOTIFICATION_CONTEXT
+{
+	HidpNotificationType NotificationType;
+	VHFOPERATIONHANDLE  VhfOperationHandle;
+	PHID_XFER_PACKET    HidTransferPacket;
+} PENDING_NOTIFICATION_CONTEXT, * PPENDING_NOTIFICATION_CONTEXT;
+
+WDF_DECLARE_CONTEXT_TYPE(PENDING_NOTIFICATION_CONTEXT);
+
 NTSTATUS HidProxyFileQueueInitialize(WDFFILEOBJECT FileObject, WDFQUEUE* Queue)
 {
 	NTSTATUS status = STATUS_SUCCESS;
@@ -119,6 +128,11 @@ HidProxyFileQueueIoWrite(
 				break;
 			}
 			fileContext->VhfHandle = vhfHandle;
+			if (!NT_SUCCESS(status))
+			{
+				WdfRequestComplete(Request, status);
+				break;
+			}
 			WdfRequestComplete(Request, STATUS_SUCCESS);
 			break;
 		}
@@ -156,6 +170,86 @@ HidProxyFileQueueIoWrite(
 	ExFreePool(buffer);
 }
 
+
+NTSTATUS HandleNotification(
+	WDFREQUEST NotificationRegisterRequest, 
+	HidpNotificationType NotificationType,
+	VHFOPERATIONHANDLE VhfOperationHandle,
+	PHID_XFER_PACKET HidTransferPacket
+)
+{
+	PAGED_CODE();
+	NTSTATUS status = STATUS_SUCCESS;
+	WDFMEMORY outputMemory;
+	status = WdfRequestRetrieveOutputMemory(NotificationRegisterRequest, &outputMemory);
+	if (!NT_SUCCESS(status))
+	{
+		WdfRequestComplete(NotificationRegisterRequest, status);
+		VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+		return status;
+	}
+
+	size_t outputBufferSize;
+	HidpNotificationHeader* outputBuffer = reinterpret_cast<HidpNotificationHeader*>(WdfMemoryGetBuffer(outputMemory, &outputBufferSize));
+
+	if (outputBuffer == NULL)
+	{
+		// TODO
+		// Bug check
+		WdfRequestComplete(NotificationRegisterRequest, STATUS_INVALID_PARAMETER);
+		VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+		return STATUS_INVALID_PARAMETER;
+	}
+	size_t outputLength = 0;
+	if (NotificationType == HidpNotificationType::GetFeature || NotificationType == HidpNotificationType::GetInputReport)
+	{
+		outputLength = sizeof(HidpNotificationHeader);
+	}
+	else if (NotificationType == HidpNotificationType::SetFeature || NotificationType == HidpNotificationType::WriteReport)
+	{
+		outputLength = sizeof(HidpNotificationHeader) + HidTransferPacket->reportBufferLen;
+	}
+	else
+	{
+		WdfRequestComplete(NotificationRegisterRequest, STATUS_INVALID_PARAMETER);
+		VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+		return STATUS_INVALID_PARAMETER;
+	}
+
+	if (outputBufferSize < outputLength)
+	{
+		WdfRequestComplete(NotificationRegisterRequest, STATUS_BUFFER_TOO_SMALL);
+		VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+		return STATUS_INVALID_PARAMETER;
+	}
+	RtlZeroMemory(outputBuffer, outputBufferSize);
+	outputBuffer->NotificationType = NotificationType;
+	outputBuffer->HidTransferPacket = HidTransferPacket;
+	outputBuffer->VhfOperationHandle = VhfOperationHandle;
+	outputBuffer->ReportId = HidTransferPacket->reportId;
+	
+	if (NotificationType == HidpNotificationType::SetFeature || NotificationType == HidpNotificationType::WriteReport)
+	{
+		outputBuffer->ReportBufferLen = HidTransferPacket->reportBufferLen;
+		status = WdfMemoryCopyFromBuffer(outputMemory, sizeof(HidpNotificationHeader), HidTransferPacket->reportBuffer, HidTransferPacket->reportBufferLen);
+		if (!NT_SUCCESS(status))
+		{
+			WdfRequestComplete(NotificationRegisterRequest, status);
+			VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+			return status;
+		}
+	}
+
+	if (!NT_SUCCESS(status))
+	{
+		WdfRequestComplete(NotificationRegisterRequest, status);
+		status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+		return status;
+	}
+	WdfRequestCompleteWithInformation(NotificationRegisterRequest, STATUS_SUCCESS, outputLength);
+	return STATUS_SUCCESS;
+}
+
 VOID
 HidProxyFileQueueIoDeviceControl(
 	_In_
@@ -173,6 +267,8 @@ HidProxyFileQueueIoDeviceControl(
 	UNREFERENCED_PARAMETER(Queue);
 	UNREFERENCED_PARAMETER(OutputBufferLength);
 
+	PAGED_CODE();
+
 	NTSTATUS status = STATUS_SUCCESS;
 
 	WDFFILEOBJECT file = WdfRequestGetFileObject(Request);
@@ -189,7 +285,33 @@ HidProxyFileQueueIoDeviceControl(
 	}
 	else if (IoControlCode == IOCTL_HIDPROXY_REGISTER_NOTIFICATION)
 	{
-		status = WdfRequestForwardToIoQueue(Request, fileContext->NotificationQueue);
+		status = WdfWaitLockAcquire(fileContext->RegisterNotificationLock, NULL);
+		if (!NT_SUCCESS(status))
+		{
+			WdfRequestComplete(Request, status);
+			return;
+		}
+		WDFOBJECT pendingNotification = WdfCollectionGetFirstItem(fileContext->PendingNotificationCollection);
+		if (pendingNotification != NULL)
+		{
+			WdfCollectionRemove(fileContext->PendingNotificationCollection, pendingNotification);
+		}
+		WdfWaitLockRelease(fileContext->RegisterNotificationLock);
+		if (pendingNotification != NULL)
+		{
+			PPENDING_NOTIFICATION_CONTEXT pendingNotificationContext = WdfObjectGet_PENDING_NOTIFICATION_CONTEXT(pendingNotification);
+			HandleNotification(Request, pendingNotificationContext->NotificationType, pendingNotificationContext->VhfOperationHandle, pendingNotificationContext->HidTransferPacket);
+			WdfObjectDelete(pendingNotification);
+		}
+		else
+		{
+			status = WdfRequestForwardToIoQueue(Request, fileContext->NotificationQueue);
+			if (!NT_SUCCESS(status))
+			{
+				WdfRequestComplete(Request, status);
+				return;
+			}
+		}
 	}
 	else if (IoControlCode == IOCTL_HIDPROXY_COMPLETE_NOTIFIACTION)
 	{
@@ -247,6 +369,31 @@ VhfCleanup(
 	ExFreePool(VhfClientContext);
 }
 
+
+
+NTSTATUS PendingNotificationCreate(WDFFILEOBJECT file, HidpNotificationType notificationType, VHFOPERATIONHANDLE  vhfOperationHandle, PHID_XFER_PACKET hidTransferPacket, WDFOBJECT* PendingNotification)
+{
+	NTSTATUS status = STATUS_SUCCESS;
+
+	WDF_OBJECT_ATTRIBUTES attributes{};
+	WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, PENDING_NOTIFICATION_CONTEXT);
+	attributes.ParentObject = file;
+
+	WDFOBJECT pendingNotification = NULL;
+	status = WdfObjectCreate(&attributes, &pendingNotification);
+	if (!NT_SUCCESS(status))
+	{
+		return status;
+	}
+	PPENDING_NOTIFICATION_CONTEXT pendingNotificationContext = WdfObjectGet_PENDING_NOTIFICATION_CONTEXT(pendingNotification);
+	pendingNotificationContext->NotificationType = notificationType;
+	pendingNotificationContext->VhfOperationHandle = vhfOperationHandle;
+	pendingNotificationContext->HidTransferPacket = hidTransferPacket;
+
+	*PendingNotification = pendingNotification;
+	return STATUS_SUCCESS;
+}
+
 VOID
 VhfAsyncOperationSetFeature(
 	_In_
@@ -262,65 +409,59 @@ VhfAsyncOperationSetFeature(
 	PAGED_CODE();
 	UNREFERENCED_PARAMETER(VhfOperationContext);
 	NTSTATUS status = STATUS_SUCCESS;
-	if (VhfClientContext == NULL)
-	{
-		return;
-	}
-	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(reinterpret_cast<PVHF_CLIENT_CONTEXT>(VhfClientContext)->FileObject);
-	WDFREQUEST notificationRequest;
+
+	WDFFILEOBJECT file = reinterpret_cast<PVHF_CLIENT_CONTEXT>(VhfClientContext)->FileObject;
+	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(file);
+
+	WDFREQUEST notificationRequest = NULL;
 	status = WdfIoQueueRetrieveNextRequest(fileContext->NotificationQueue, &notificationRequest);
 	if (!NT_SUCCESS(status))
 	{
-		// TODO
-		// STATUS_NO_MORE_ENTRIES
-		return;
-	}
-	if (notificationRequest == NULL)
-	{
-		// TODO
-		// Don't know if STATUS_NOT_SUPPORTED is appropriate.
-		status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
-		return;
-	}
-	WDFMEMORY outputMemory;
-	status = WdfRequestRetrieveOutputMemory(notificationRequest, &outputMemory);
-	if (!NT_SUCCESS(status))
-	{
-		WdfRequestComplete(notificationRequest, status);
-		return;
-	}
+		if (status == STATUS_NO_MORE_ENTRIES)
+		{
+			WDFOBJECT pendingNotification = NULL;
+			status = PendingNotificationCreate(file, HidpNotificationType::SetFeature, VhfOperationHandle, HidTransferPacket, &pendingNotification);
+			if (!NT_SUCCESS(status))
+			{
+				VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+				return;
+			}
 
-	size_t outputBufferSize;
-	HidpNotificationHeader* outputBuffer = reinterpret_cast<HidpNotificationHeader*>(WdfMemoryGetBuffer(outputMemory, &outputBufferSize));
+			// TODO
+			// Lock probably should be moved before retriveing next request
+			status = WdfWaitLockAcquire(fileContext->RegisterNotificationLock, NULL);
+			if (!NT_SUCCESS(status))
+			{
+				VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+				return;
+			}
+			do
+			{
+				status = WdfCollectionAdd(fileContext->PendingNotificationCollection, pendingNotification);
+				if (!NT_SUCCESS(status))
+				{
+					break;
+				}
+			} while (false);
 
-	if (outputBuffer == NULL)
-	{
-		// TODO
-		// Bug check
-		return;
+			WdfWaitLockRelease(fileContext->RegisterNotificationLock);
+			if (!NT_SUCCESS(status))
+			{
+				VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+				return;
+			}
+		}
+		else
+		{
+			VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+			return;
+		}
+		
 	}
-
-	if (outputBufferSize < sizeof(HidpNotificationHeader) + HidTransferPacket->reportBufferLen)
+	else
 	{
-		WdfRequestComplete(notificationRequest, STATUS_BUFFER_TOO_SMALL);
-		status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
-		return;
+		HandleNotification(notificationRequest, HidpNotificationType::SetFeature, VhfOperationHandle, HidTransferPacket);
 	}
-
-	outputBuffer->NotificationType = HidpNotificationType::SetFeature;
-	outputBuffer->HidTransferPacket = HidTransferPacket;
-	outputBuffer->VhfOperationHandle = VhfOperationHandle;
-	outputBuffer->ReportId = HidTransferPacket->reportId;
-	outputBuffer->ReportBufferLen = HidTransferPacket->reportBufferLen;
-	status = WdfMemoryCopyFromBuffer(outputMemory, sizeof(HidpNotificationHeader), HidTransferPacket->reportBuffer, HidTransferPacket->reportBufferLen);
-	if (!NT_SUCCESS(status))
-	{
-		WdfRequestComplete(notificationRequest, status);
-		status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
-		return;
-	}
-	WdfRequestCompleteWithInformation(notificationRequest, STATUS_SUCCESS, static_cast<ULONG_PTR>(sizeof(HidpNotificationHeader) + HidTransferPacket->reportBufferLen));
-	// status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_SUCCESS);
 }
 
 VOID
@@ -338,62 +479,55 @@ VhfAsyncOperationGetFeature(
 	PAGED_CODE();
 	UNREFERENCED_PARAMETER(VhfOperationContext);
 	NTSTATUS status = STATUS_SUCCESS;
-	if (VhfClientContext == NULL)
-	{
-		return;
-	}
-	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(reinterpret_cast<PVHF_CLIENT_CONTEXT>(VhfClientContext)->FileObject);
-	WDFREQUEST notificationRequest;
+
+	WDFFILEOBJECT file = reinterpret_cast<PVHF_CLIENT_CONTEXT>(VhfClientContext)->FileObject;
+	PFILE_CONTEXT fileContext = WdfObjectGet_FILE_CONTEXT(file);
+
+	WDFREQUEST notificationRequest = NULL;
 	status = WdfIoQueueRetrieveNextRequest(fileContext->NotificationQueue, &notificationRequest);
 	if (!NT_SUCCESS(status))
 	{
-		// TODO
-		// STATUS_NO_MORE_ENTRIES
-		return;
-	}
-	if (notificationRequest == NULL)
-	{
-		// TODO
-		// Don't know if STATUS_NOT_SUPPORTED is appropriate.
-		status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
-		return;
-	}
-	WDFMEMORY outputMemory;
-	status = WdfRequestRetrieveOutputMemory(notificationRequest, &outputMemory);
-	if (!NT_SUCCESS(status))
-	{
-		WdfRequestComplete(notificationRequest, status);
-		return;
-	}
+		if (status == STATUS_NO_MORE_ENTRIES)
+		{
+			WDFOBJECT pendingNotification = NULL;
+			status = PendingNotificationCreate(file, HidpNotificationType::GetFeature, VhfOperationHandle, HidTransferPacket, &pendingNotification);
+			if (!NT_SUCCESS(status))
+			{
+				VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+				return;
+			}
 
-	size_t outputBufferSize;
-	HidpNotificationHeader* outputBuffer = reinterpret_cast<HidpNotificationHeader*>(WdfMemoryGetBuffer(outputMemory, &outputBufferSize));
-	RtlZeroMemory(outputBuffer, outputBufferSize);
-	if (outputBuffer == NULL)
-	{
-		// TODO
-		// Bug check
-		return;
-	}
+			status = WdfWaitLockAcquire(fileContext->RegisterNotificationLock, NULL);
+			if (!NT_SUCCESS(status))
+			{
+				VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+				return;
+			}
+			do
+			{
+				status = WdfCollectionAdd(fileContext->PendingNotificationCollection, pendingNotification);
+				if (!NT_SUCCESS(status))
+				{
+					break;
+				}
+			} while (false);
 
-	if (outputBufferSize < sizeof(HidpNotificationHeader))
-	{
-		WdfRequestComplete(notificationRequest, STATUS_BUFFER_TOO_SMALL);
-		status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
-		return;
-	}
+			WdfWaitLockRelease(fileContext->RegisterNotificationLock);
+			if (!NT_SUCCESS(status))
+			{
+				VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+				return;
+			}
+		}
+		else
+		{
+			VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
+			return;
+		}
 
-	outputBuffer->NotificationType = HidpNotificationType::GetFeature;
-	outputBuffer->HidTransferPacket = HidTransferPacket;
-	outputBuffer->VhfOperationHandle = VhfOperationHandle;
-	outputBuffer->ReportId = HidTransferPacket->reportId;
-	outputBuffer->ReportBufferLen = HidTransferPacket->reportBufferLen;
-
-	if (!NT_SUCCESS(status))
-	{
-		WdfRequestComplete(notificationRequest, status);
-		status = VhfAsyncOperationComplete(VhfOperationHandle, STATUS_NOT_SUPPORTED);
-		return;
 	}
-	WdfRequestCompleteWithInformation(notificationRequest, STATUS_SUCCESS, static_cast<ULONG_PTR>(sizeof(HidpNotificationHeader)));
+	else
+	{
+		HandleNotification(notificationRequest, HidpNotificationType::GetFeature, VhfOperationHandle, HidTransferPacket);
+	}
 }

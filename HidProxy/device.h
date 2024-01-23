@@ -17,6 +17,10 @@ typedef struct _FILE_CONTEXT
 	WDFQUEUE FileQueue;
 	WDFQUEUE NotificationQueue;
 	WDFDEVICE Device;
+	// This lock is initially locked.
+	// It releases When user application send a notification register IOCTL.
+	WDFWAITLOCK RegisterNotificationLock;
+	WDFCOLLECTION PendingNotificationCollection;
 
 } FILE_CONTEXT, * PFILE_CONTEXT;
 

@@ -22,7 +22,6 @@ struct NotifyThreadParams
 {
 	HANDLE CompletionPort;
 	HIDPHANDLE HidpHandle;
-	HANDLE NotifyThreadReadyEvent;
 };
 
 DWORD NotifyThreadProc(
@@ -44,7 +43,6 @@ DWORD NotifyThreadProc(
 		return err;
 	}
 	bool needRegister = true;
-	HANDLE notifyThreadReadyEvent = params->NotifyThreadReadyEvent;
 	while (true)
 	{
 		if (needRegister)
@@ -66,16 +64,6 @@ DWORD NotifyThreadProc(
 				{
 					return err;
 				}
-			}
-			if (notifyThreadReadyEvent != NULL)
-			{
-				bStatus = SetEvent(notifyThreadReadyEvent);
-				if (!bStatus)
-				{
-					auto err = GetLastError();
-					return err;
-				}
-				notifyThreadReadyEvent = NULL;
 			}
 			needRegister = false;
 		}
@@ -205,8 +193,6 @@ HRESULT HidpCreate(DWORD nReportDescriptorSize, LPCVOID lpReportDescriptor, PSET
 		NotifyThreadParams* threadParams = new NotifyThreadParams();
 		threadParams->CompletionPort = completionPort;
 		threadParams->HidpHandle = *pHidpHandle;
-		HANDLE notifyThreadReadyEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-		threadParams->NotifyThreadReadyEvent = notifyThreadReadyEvent;
 		HANDLE notifyThread = CreateThread(NULL, 0, NotifyThreadProc, threadParams, 0, NULL);
 		if (notifyThread == INVALID_HANDLE_VALUE || notifyThread == NULL)
 		{
@@ -251,13 +237,6 @@ HRESULT HidpCreate(DWORD nReportDescriptorSize, LPCVOID lpReportDescriptor, PSET
 		}
 
 		auto waitResult = WaitForSingleObject(overlapped.hEvent, INFINITE);
-		if (waitResult != ERROR_SUCCESS)
-		{
-			hr = winrt::impl::hresult_from_win32(waitResult);
-			break;
-		}
-
-		waitResult = WaitForSingleObject(notifyThreadReadyEvent, INFINITE);
 		if (waitResult != ERROR_SUCCESS)
 		{
 			hr = winrt::impl::hresult_from_win32(waitResult);
