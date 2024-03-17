@@ -11,7 +11,7 @@
 using namespace winrt::Windows::Storage::Streams;
 namespace winrt::LibHidpRT::implementation
 {
-	struct NotifyThreadParams
+	struct Hidp::NotifyThreadParams
 	{
 		implementation::Hidp* Hidp;
 	};
@@ -24,7 +24,7 @@ namespace winrt::LibHidpRT::implementation
 		DWORD bytesTransferred = 0;
 		Windows::Storage::Streams::Buffer buffer{ 1024 };
 		OVERLAPPED overlapped{};
-
+		DWORD win32Status = 0;
 		// although we don't use this event, but document says:
 		// https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-deviceiocontrol#parameters
 		// If hDevice was opened with the FILE_FLAG_OVERLAPPED flag, the operation is performed as an overlapped (asynchronous) operation. In this case, lpOverlapped must point to a valid OVERLAPPED structure that contains a handle to an event object. Otherwise, the function fails in unpredictable ways.
@@ -41,11 +41,12 @@ namespace winrt::LibHidpRT::implementation
 				bStatus = DeviceIoControl(params->Hidp->_HidpHandle, IOCTL_HIDPROXY_REGISTER_NOTIFICATION, NULL, 0, buffer.data(), buffer.Capacity(), &bytesReturn, &overlapped);
 				if (!bStatus)
 				{
-					auto err = GetLastError();
-					if (err != ERROR_IO_PENDING)
+					win32Status = GetLastError();
+					if (win32Status != ERROR_IO_PENDING)
 					{
-						check_win32(err);
+						break;
 					}
+					win32Status = ERROR_SUCCESS;
 				}
 
 				needRegister = false;
@@ -56,8 +57,8 @@ namespace winrt::LibHidpRT::implementation
 			bStatus = GetQueuedCompletionStatus(params->Hidp->_NotificationCompletionPort, &bytesTransferred, &completionKey, &getQueuedCompletionStatusOverlapped, INFINITE);
 			if (!bStatus)
 			{
-				auto err = GetLastError();
-				check_win32(err);
+				win32Status = GetLastError();
+				break;
 			}
 			if (&overlapped == getQueuedCompletionStatusOverlapped)
 			{
@@ -66,8 +67,8 @@ namespace winrt::LibHidpRT::implementation
 				bStatus = GetOverlappedResult(params->Hidp->_HidpHandle, &overlapped, &bytesTransferred, FALSE);
 				if (!bStatus)
 				{
-					auto err = GetLastError();
-					check_win32(err);
+					win32Status = GetLastError();
+					break;
 				}
 
 				Windows::Storage::Streams::Buffer receivedBuffer{ bytesTransferred };
@@ -104,11 +105,12 @@ namespace winrt::LibHidpRT::implementation
 				}
 				else
 				{
-					check_win32(ERROR_NOT_SUPPORTED);
+					win32Status = ERROR_NOT_SUPPORTED;
 				}
 			}
 		}
 		CloseHandle(overlapped.hEvent);
+		return win32Status;
 	}
 
 	Windows::Foundation::IAsyncAction WriteFileAsync(HANDLE handle, const Buffer buffer)
@@ -341,11 +343,60 @@ namespace winrt::LibHidpRT::implementation
 
     void Hidp::Close()
     {
-		BOOL bStatus = CloseHandle(_HidpHandle);
-		if (!bStatus)
+		BOOL bStatus = TRUE;
+		DWORD win32Status = 0;
+
+		if (_HidpHandle != NULL)
 		{
-			check_win32(GetLastError());
+			bStatus = CloseHandle(_HidpHandle);
+			if (!bStatus)
+			{
+				check_win32(GetLastError());
+			}
+			_HidpHandle = NULL;
 		}
+
+		// File handle must be close before closing _NotificationCompletionPort
+		// https://learn.microsoft.com/en-us/windows/win32/fileio/createiocompletionport#remarks
+		if (_NotificationCompletionPort != NULL)
+		{
+			bStatus = CloseHandle(_NotificationCompletionPort);
+			if (!bStatus)
+			{
+				check_win32(GetLastError());
+			}
+			_NotificationCompletionPort = NULL;
+		}
+		
+		
+		if (_NotifyThread != NULL)
+		{
+			win32Status = WaitForSingleObject(_NotifyThread, INFINITE);
+			if (win32Status != WAIT_OBJECT_0)
+			{
+				check_win32(win32Status);
+			}
+			DWORD exitCode = 0;
+			bStatus = GetExitCodeThread(_NotifyThread, &exitCode);
+			if (!bStatus)
+			{
+				check_win32(GetLastError());
+			}
+			if (exitCode != ERROR_SUCCESS ||  exitCode != ERROR_OPERATION_ABORTED)
+			{
+				check_win32(exitCode);
+			}
+
+			CloseHandle(_NotifyThread);
+			_NotifyThread = NULL;
+		}
+		if (_NotifyThreadParams != NULL) {
+			delete _NotifyThreadParams;
+			_NotifyThreadParams = NULL;
+		}
+
+		_OnGetFeatureRequestEvent.clear();
+		_OnSetFeatureRequestEvent.clear();
     }
 
 	void Hidp::CompleteSetFeatureRequest(winrt::LibHidpRT::SetFeatureRequest request, bool supported)
@@ -419,12 +470,12 @@ namespace winrt::LibHidpRT::implementation
 
 		// TODO
 		// need to delete params
-		NotifyThreadParams* params = new NotifyThreadParams();
-		params->Hidp = this;
+		_NotifyThreadParams = new NotifyThreadParams();
+		_NotifyThreadParams->Hidp = this;
 
 		// TODO
 		// need to stop the thread when closing the hidp
-		CreateThread(NULL, 0, NotifyThreadProc, params, 0, NULL);
+		_NotifyThread = CreateThread(NULL, 0, NotifyThreadProc, _NotifyThreadParams, 0, NULL);
 
 		Windows::Storage::Streams::Buffer createVHidRequestBuffer{ static_cast<uint32_t>(reportDescriptor.Length() + sizeof(HidpQueueRequestHeader)) };
 		createVHidRequestBuffer.Length(createVHidRequestBuffer.Capacity());

@@ -39,10 +39,16 @@ namespace winrt::LibHidpRT::implementation
         void CompleteSetFeatureRequest(winrt::LibHidpRT::SetFeatureRequest request, bool supported);
 
     private:
+        struct NotifyThreadParams;
         Windows::Foundation::IAsyncAction InitAsync(winrt::Windows::Storage::Streams::Buffer reportDescriptor);
         static DWORD NotifyThreadProc(_In_ LPVOID lpParameter);
         HANDLE _HidpHandle = NULL;
-        HANDLE _NotificationCompletionPort;
+        HANDLE _NotificationCompletionPort = NULL;
+        HANDLE _NotifyThread = NULL;
+
+        // TODO
+        // change to unique ptr
+        NotifyThreadParams* _NotifyThreadParams = NULL;
 
         winrt::event<Windows::Foundation::EventHandler<winrt::LibHidpRT::GetFeatureRequest>> _OnGetFeatureRequestEvent;
         winrt::event<Windows::Foundation::EventHandler<winrt::LibHidpRT::SetFeatureRequest>> _OnSetFeatureRequestEvent;

@@ -13,6 +13,7 @@ namespace BooxAsDigitizer.Test
 {
     internal class Program
     {
+        // First byte 0..0x7f for report id
         static Byte REPORTID_TOUCHPAD = 0x01;
         static Byte REPORTID_MAX_COUNT = 0x02;
         static Byte REPORTID_PTPHQA = 0x03;
@@ -20,6 +21,9 @@ namespace BooxAsDigitizer.Test
         static Byte REPORTID_FUNCTION_SWITCH = 0x05;
         static Byte REPORTID_MOUSE = 0x06;
         static Byte REPORTID_PEN = 0x07;
+
+        static Byte SETUPID_RESET_DESCRIPTOR = 0x80;
+
         static UInt16 TOUCHPAD_PHY_WIDTH = 6181 / 4;
         static UInt16 TOUCHPAD_PHY_HEIGHT = 4606 / 4;
 
@@ -215,9 +219,26 @@ namespace BooxAsDigitizer.Test
         static BufferBlock<Windows.Storage.Streams.Buffer> PendingBuffers = new();
         static async Task Main(string[] args)
         {
+            var resetHidDescriptorCts = new CancellationTokenSource();
             var receiveBufferTask = ReceiveBufferAsync();
-            var consumeBufferTask = ConsumeBufferAsync();
+            var consumeBufferTask = ConsumeBufferAsync(resetHidDescriptorCts, resetHidDescriptorCts.Token);
+            
+            while(true)
+            {
+                try
+                {
+                    await consumeBufferTask;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    resetHidDescriptorCts = new CancellationTokenSource();
+                    consumeBufferTask = ConsumeBufferAsync(resetHidDescriptorCts, resetHidDescriptorCts.Token);
+                }
+            }
+
             await Task.WhenAll(receiveBufferTask, consumeBufferTask);
+            
+            
         }
 
         static async Task ReceiveBufferAsync()
@@ -245,7 +266,7 @@ namespace BooxAsDigitizer.Test
             }
         }
 
-        static async Task ConsumeBufferAsync()
+        static async Task ConsumeBufferAsync(CancellationTokenSource resetHidDescriptorCts, CancellationToken token)
         {
             var penReportDescriptorBuffer = new Windows.Storage.Streams.Buffer((uint)(HidDescriptor.Length));
             penReportDescriptorBuffer.Length = (uint)HidDescriptor.Length;
@@ -272,7 +293,14 @@ namespace BooxAsDigitizer.Test
                     {
                         reader.ByteOrder = ByteOrder.LittleEndian;
                         reportId = reader.ReadByte();
-                        if(reportId == REPORTID_PEN)
+                        if(reportId == SETUPID_RESET_DESCRIPTOR)
+                        {
+                            HidDescriptor = new byte[msg.Length - 1];
+                            reader.ReadBytes(HidDescriptor);
+                            resetHidDescriptorCts.Cancel();
+                        }
+                        token.ThrowIfCancellationRequested();
+                        if (reportId == REPORTID_PEN)
                         {
                             var byte1 = reader.ReadByte();
                             bool tipSwitch = (byte1 & 1) != 0;
@@ -288,7 +316,6 @@ namespace BooxAsDigitizer.Test
                             Byte yTilt = reader.ReadByte();
                             latestPenPos = (x, y);
                             presentedContacts.Clear();
-                            Console.WriteLine($"Pen: ({x}, {y} ,InRange: {inRange}, B1: {byte1})");
                         }
                         else if(reportId == REPORTID_TOUCHPAD)
                         {
