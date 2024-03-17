@@ -382,7 +382,7 @@ namespace winrt::LibHidpRT::implementation
 			{
 				check_win32(GetLastError());
 			}
-			if (exitCode != ERROR_SUCCESS ||  exitCode != ERROR_OPERATION_ABORTED)
+			if (exitCode != ERROR_SUCCESS && exitCode != ERROR_OPERATION_ABORTED)
 			{
 				check_win32(exitCode);
 			}
