@@ -331,8 +331,8 @@ namespace BooxAsDigitizer.Test
                             {
                                 if(presentedContacts.Count == 0 && latestPenPos != null)
                                 {
-                                    double normalizedLatestPenX = ((double)latestPenPos.Value.X) / 21240;
-                                    double normalizedLatestPenY = ((double)latestPenPos.Value.Y) / 15980;
+                                    double normalizedLatestPenX = ((double)latestPenPos.Value.X) / 1872;
+                                    double normalizedLatestPenY = ((double)latestPenPos.Value.Y) / 1404;
 
 
                                     latestPenPos = null;
@@ -350,7 +350,8 @@ namespace BooxAsDigitizer.Test
 
                                 }
                                 presentedContacts[contactId] = true;
-                                if(contactCount == 1)
+                                // skip = true;
+                                if (contactCount == 1)
                                 {
                                     // skip = true;
                                 }
@@ -366,7 +367,8 @@ namespace BooxAsDigitizer.Test
                         await submitReportTask;
                         submitReportTask = null;
                     }
-                    if(!skip)
+                    // skip = true;
+                    if (!skip)
                     {
                         submitReportTask = hidp.SubmitReportAsync(reportId, msg).AsTask();
                     }
