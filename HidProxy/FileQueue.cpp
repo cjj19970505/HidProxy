@@ -105,6 +105,9 @@ HidProxyFileQueueIoWrite(
 	do
 	{
 		HidpQueueRequestHeader* header = (HidpQueueRequestHeader*)buffer;
+
+		// TODO
+		// Move VHid creation to IoCtl;
 		if (header->RequestType == HidpQueueWriteRequestType::CreateVHid)
 		{
 			if (fileContext->VhfHandle != NULL)
@@ -138,6 +141,16 @@ HidProxyFileQueueIoWrite(
 		}
 		else if (header->RequestType == HidpQueueWriteRequestType::SendReport)
 		{
+			if (fileContext->VhfHandle == NULL)
+			{
+				WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
+				break;
+			}
+			if (!fileContext->VhfStarted)
+			{
+				WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
+				break;
+			}
 			HidQueueRequestSubmitReport* report = reinterpret_cast<HidQueueRequestSubmitReport*>(&header->Data);
 			if (header->Size < sizeof(HidQueueRequestSubmitReport))
 			{
@@ -280,7 +293,13 @@ HidProxyFileQueueIoDeviceControl(
 			WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
 			return;
 		}
+		if (fileContext->VhfStarted)
+		{
+			WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
+			return;
+		}
 		status = VhfStart(fileContext->VhfHandle);
+		fileContext->VhfStarted = TRUE;
 		WdfRequestComplete(Request, status);
 	}
 	else if (IoControlCode == IOCTL_HIDPROXY_REGISTER_NOTIFICATION)

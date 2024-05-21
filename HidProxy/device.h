@@ -14,6 +14,7 @@ WDF_DECLARE_CONTEXT_TYPE(DEVICE_CONTEXT);
 typedef struct _FILE_CONTEXT
 {
 	VHFHANDLE VhfHandle;
+	BOOLEAN VhfStarted;
 	WDFQUEUE FileQueue;
 	WDFQUEUE NotificationQueue;
 	WDFDEVICE Device;

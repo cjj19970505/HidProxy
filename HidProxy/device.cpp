@@ -109,6 +109,7 @@ HidProxyEvtDeviceFileCreate(
 	PFILE_CONTEXT pFileContext = WdfObjectGet_FILE_CONTEXT(FileObject);
 	pFileContext->Device = Device;
 	pFileContext->VhfHandle = NULL;
+	pFileContext->VhfStarted = FALSE;
 	WDFQUEUE fileQueue = NULL;
 	status = HidProxyFileQueueInitialize(FileObject, &fileQueue);
 	if (!NT_SUCCESS(status))
