@@ -1,8 +1,22 @@
+This project implements a virtual HID Framework for user mode applications.
+
+Orignally used for BooxAsDigitizer project, but I decide to single it out since there could be more use to it.
+
+# How it works
+
+This project creates a kernel mode driver that utilizes the [VHF](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/vhf/).
+
+# Risk
+
+You need to install the kernel mode driver built from this libaries, which if not properly signed, can only ran when you set your PC to test-sign mode.
+
+- [How to Test-Sign a Driver Package](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/how-to-test-sign-a-driver-package)
+
 # Prerequisite
 - [Zadig](https://zadig.akeo.ie/) for installing USB driver for Android 
 
 # Related Projects:
-[BooxAsDigitizer](https://xeonj.visualstudio.com/Misc/_git/BooxAsDigitizer)
+- [BooxAsDigitizer](https://xeonj.visualstudio.com/Misc/_git/BooxAsDigitizer)
 
 # Debug
 

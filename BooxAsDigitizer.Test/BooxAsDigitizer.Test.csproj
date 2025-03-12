@@ -13,7 +13,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AoaRT\AoaRT.vcxproj" />
-    <ProjectReference Include="..\BooxAsDigitizer\BooxAsDigitizer.csproj" />
     <ProjectReference Include="..\LibHidpRT\LibHidpRT.vcxproj" />
   </ItemGroup>
 

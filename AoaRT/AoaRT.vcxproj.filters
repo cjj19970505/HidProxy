@@ -24,7 +24,6 @@
     <ClInclude Include="Utils.h" />
   </ItemGroup>
   <ItemGroup>
-    <Midl Include="Class.idl" />
     <Midl Include="AoaDevice.idl" />
   </ItemGroup>
   <ItemGroup>

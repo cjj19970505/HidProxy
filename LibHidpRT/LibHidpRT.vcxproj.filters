@@ -23,7 +23,6 @@
     <ClInclude Include="GetFeatureRequest.h" />
   </ItemGroup>
   <ItemGroup>
-    <Midl Include="Class.idl" />
     <Midl Include="Hidp.idl" />
   </ItemGroup>
   <ItemGroup>
